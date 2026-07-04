@@ -1,0 +1,8 @@
+{
+  "name": "Financial Statement Generator",
+  "description": "Calculate and generate professional income statements and balance sheets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
