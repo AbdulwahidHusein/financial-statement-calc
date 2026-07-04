@@ -147,43 +147,43 @@ export default function FinancialApp() {
 
   return (
     <div className="h-screen flex flex-col bg-slate-50 text-slate-900 font-sans overflow-hidden print:h-auto print:overflow-visible print:bg-white">
-      <header className="flex-none bg-white border-b border-slate-200 px-4 md:px-6 py-4 flex items-center justify-between sticky top-0 z-10 print:hidden">
-        <div className="flex items-center gap-3">
+      <header className="flex-none bg-white border-b border-slate-200 px-3 md:px-6 py-2.5 md:py-3 flex items-center justify-between sticky top-0 z-10 print:hidden">
+        <div className="flex items-center gap-2 md:gap-3 min-w-0">
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="xl:hidden p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+            className="xl:hidden p-1.5 -ml-1 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors flex-shrink-0"
             aria-label={isSidebarOpen ? 'Close data entry panel' : 'Open data entry panel'}
           >
-            {isSidebarOpen ? <X size={24} /> : <Menu size={24} />}
+            {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
-          <div className="hidden sm:block bg-indigo-600 p-2 rounded-lg text-white">
-            <Briefcase size={24} />
+          <div className="hidden sm:block bg-indigo-600 p-1.5 rounded-lg text-white flex-shrink-0">
+            <Briefcase size={20} />
           </div>
-          <div>
-            <h1 className="text-lg md:text-xl font-semibold tracking-tight">Financial Statement Generator</h1>
-            <p className="hidden sm:block text-sm text-slate-500 font-medium">Create professional P&L and Balance Sheets</p>
+          <div className="min-w-0">
+            <h1 className="text-base md:text-lg font-semibold tracking-tight truncate">Financial Statement Generator</h1>
+            <p className="hidden md:block text-xs text-slate-500 font-medium">Create professional P&L and Balance Sheets</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 flex-shrink-0">
           <button
             onClick={handleExportPdf}
             disabled={isExporting}
-            className="flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-60 disabled:cursor-not-allowed text-indigo-700 px-3 md:px-4 py-2 rounded-md font-medium transition-colors text-sm md:text-base border border-indigo-200"
+            className="flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-60 disabled:cursor-not-allowed text-indigo-700 px-2.5 md:px-3 py-1.5 rounded-md font-medium transition-colors text-xs md:text-sm border border-indigo-200"
           >
-            {isExporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+            {isExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
             <span className="hidden sm:inline">{isExporting ? 'Exporting…' : 'Export PDF'}</span>
           </button>
           <button
             onClick={handlePrint}
-            className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 md:px-4 py-2 rounded-md font-medium transition-colors text-sm md:text-base border border-slate-200"
+            className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 md:px-3 py-1.5 rounded-md font-medium transition-colors text-xs md:text-sm border border-slate-200"
           >
-            <Printer size={18} />
+            <Printer size={16} />
             <span className="hidden sm:inline">Print</span>
           </button>
         </div>
       </header>
 
-      <main className="flex-1 min-h-0 w-full max-w-[1920px] mx-auto p-4 md:p-6 flex flex-col xl:flex-row gap-6 print:p-0 print:block print:h-auto print:overflow-visible overflow-y-auto xl:overflow-hidden relative">
+      <main className="flex-1 min-h-0 w-full max-w-[1920px] mx-auto p-2 md:p-4 xl:p-6 flex flex-col xl:flex-row gap-3 xl:gap-6 print:p-0 print:block print:h-auto print:overflow-visible overflow-y-auto xl:overflow-hidden relative">
         {isSidebarOpen && (
           <button
             type="button"
@@ -322,62 +322,30 @@ export default function FinancialApp() {
         </div>
 
         {/* Right Column: Generated Reports */}
-        <div className="flex-1 flex flex-col min-w-0 print:block xl:h-full xl:pb-6 print:h-auto print:overflow-visible">
-          {projectionYears > 0 && (
-            <div className="mb-4 print:hidden rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
-              Viewing <strong>{getProjectionLabel(projectionYears).toLowerCase()}</strong> — values roll forward each year
-              (inventory, equity, cash, tax payable, and 10% depreciation on fixed assets). Sales and expenses stay the same.
-              Bank working capital loan is recalculated from each projected balance sheet.
-            </div>
-          )}
-          {warnings.length > 0 && (
-            <div className="mb-4 print:hidden space-y-2">
-              {warnings.map((warning) => (
-                <ValidationBanner key={warning} message={warning} />
-              ))}
-            </div>
-          )}
-
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 print:block xl:h-full print:h-auto print:overflow-visible">
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col min-h-0 print:border-none print:shadow-none print:h-auto print:overflow-visible print:block">
-            {/* Tabs */}
-            <div className="flex border-b border-slate-200 bg-slate-50/80 px-2 pt-2 print:hidden overflow-x-auto">
-              <button
-                onClick={() => setActiveTab('income')}
-                className={`px-6 py-3 font-medium text-sm rounded-t-lg transition-colors whitespace-nowrap flex items-center gap-2 ${activeTab === 'income' ? 'bg-white text-indigo-700 border-x border-t border-slate-200 shadow-[0_2px_0_0_white]' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100/50'}`}
-              >
-                <FileText size={16} />
-                Profit & Loss
-              </button>
-              <button
-                onClick={() => setActiveTab('balance')}
-                className={`px-6 py-3 font-medium text-sm rounded-t-lg transition-colors whitespace-nowrap flex items-center gap-2 ${activeTab === 'balance' ? 'bg-white text-indigo-700 border-x border-t border-slate-200 shadow-[0_2px_0_0_white]' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100/50'}`}
-              >
-                <Briefcase size={16} />
-                Balance Sheet
-              </button>
-              <button
-                onClick={() => setActiveTab('ratios')}
-                className={`px-6 py-3 font-medium text-sm rounded-t-lg transition-colors whitespace-nowrap flex items-center gap-2 ${activeTab === 'ratios' ? 'bg-white text-indigo-700 border-x border-t border-slate-200 shadow-[0_2px_0_0_white]' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100/50'}`}
-              >
-                <Activity size={16} />
-                Financial Ratios
-              </button>
-            </div>
+            <ReportToolbar
+              activeTab={activeTab}
+              onTabChange={setActiveTab}
+              statementDate={data.statementDate}
+              projectionYears={projectionYears}
+              displayDateLabel={displayDateLabel}
+              onProjectionChange={setProjectionYears}
+            />
 
-            <div className="px-4 md:px-6 py-3 border-b border-slate-200 bg-white print:hidden">
-              <StatementPeriodBar
-                statementDate={data.statementDate}
+            {(projectionYears > 0 || warnings.length > 0) && (
+              <CompactAlertStrip
                 projectionYears={projectionYears}
                 displayDateLabel={displayDateLabel}
-                onChange={setProjectionYears}
+                warnings={warnings}
               />
-            </div>
+            )}
 
             {/* Document Content */}
             <div
               id="report-container"
-              className={`p-4 md:p-6 lg:p-8 bg-white document-container print:overflow-visible print:p-0 ${
-                isExportingPdf ? 'overflow-visible h-auto' : 'flex-1 overflow-auto'
+              className={`p-2 sm:p-3 md:p-4 bg-white document-container print:overflow-visible print:p-0 ${
+                isExportingPdf ? 'overflow-visible h-auto' : 'flex-1 min-h-0 overflow-auto'
               }`}
             >
               <div
@@ -392,6 +360,7 @@ export default function FinancialApp() {
                     title="Profit And Loss Statement"
                     displayDateLabel={displayDateLabel}
                     projectionYears={projectionYears}
+                    forExport={isExportingPdf}
                   />
 
                   <div className="w-full border border-slate-800 border-collapse">
@@ -444,6 +413,7 @@ export default function FinancialApp() {
                     title="Balance Sheet"
                     displayDateLabel={displayDateLabel}
                     projectionYears={projectionYears}
+                    forExport={isExportingPdf}
                   />
 
                   <div className="w-full border border-slate-800 border-collapse">
@@ -508,12 +478,13 @@ export default function FinancialApp() {
               </div>
 
               <div className={`print:break-before-page ${activeTab === 'ratios' ? 'block print:block' : 'hidden print:block'}`}>
-                <div className="max-w-4xl mx-auto mb-16 print:mb-24">
+                <div className="max-w-4xl mx-auto mb-4 md:mb-6 print:mb-24">
                   <ReportStatementHeader
                     companyName={displayData.companyName}
                     title="Financial Ratios & Metrics"
                     displayDateLabel={displayDateLabel}
                     projectionYears={projectionYears}
+                    forExport={false}
                   />
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 print:grid-cols-2">
@@ -660,48 +631,124 @@ function StatementPeriodSelector({
   );
 }
 
-function StatementPeriodBar({
+function ReportToolbar({
+  activeTab,
+  onTabChange,
   statementDate,
   projectionYears,
   displayDateLabel,
-  onChange,
+  onProjectionChange,
 }: {
+  activeTab: 'income' | 'balance' | 'ratios';
+  onTabChange: (tab: 'income' | 'balance' | 'ratios') => void;
   statementDate: string;
   projectionYears: number;
   displayDateLabel: string;
-  onChange: (years: number) => void;
+  onProjectionChange: (years: number) => void;
+}) {
+  const tabs = [
+    { id: 'income' as const, label: 'P&L', fullLabel: 'Profit & Loss', icon: FileText },
+    { id: 'balance' as const, label: 'Balance', fullLabel: 'Balance Sheet', icon: Briefcase },
+    { id: 'ratios' as const, label: 'Ratios', fullLabel: 'Financial Ratios', icon: Activity },
+  ];
+
+  return (
+    <div className="flex-none border-b border-slate-200 bg-slate-50/80 print:hidden">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-2 py-2">
+        <div className="flex min-w-0 overflow-x-auto gap-1" role="tablist" aria-label="Report sections">
+          {tabs.map(({ id, label, fullLabel, icon: Icon }) => (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={activeTab === id}
+              onClick={() => onTabChange(id)}
+              title={fullLabel}
+              className={`px-2.5 sm:px-3 py-1.5 font-medium text-xs sm:text-sm rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                activeTab === id
+                  ? 'bg-white text-indigo-700 border border-slate-200 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700 hover:bg-white/70'
+              }`}
+            >
+              <Icon size={14} className="flex-shrink-0" />
+              <span className="sm:hidden">{label}</span>
+              <span className="hidden sm:inline">{fullLabel}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2 px-1 sm:px-0 sm:border-l sm:border-slate-200 sm:pl-3 flex-shrink-0">
+          <div className="hidden md:flex items-center gap-1.5 text-xs text-slate-500 min-w-0">
+            <CalendarRange size={14} className="text-indigo-600 flex-shrink-0" />
+            <span className="truncate">
+              {displayDateLabel}
+              {projectionYears > 0 && (
+                <span className="ml-1.5 text-indigo-600 font-medium">· Projected</span>
+              )}
+            </span>
+          </div>
+          <label htmlFor="report-period-select" className="sr-only">
+            View period
+          </label>
+          <select
+            id="report-period-select"
+            value={projectionYears}
+            onChange={(e) => onProjectionChange(Number(e.target.value))}
+            disabled={!statementDate}
+            title={statementDate ? `Viewing ${displayDateLabel}` : 'Set a statement date first'}
+            className="w-full sm:w-auto min-w-0 sm:min-w-[9.5rem] px-2 py-1.5 bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-xs sm:text-sm font-medium disabled:opacity-50"
+          >
+            {Array.from({ length: MAX_PROJECTION_YEARS + 1 }, (_, years) => (
+              <option key={years} value={years}>
+                {getProjectionLabel(years)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="md:hidden px-2 pb-1.5 text-[11px] text-slate-500 truncate border-t border-slate-200/60">
+        As of <span className="font-medium text-slate-700">{displayDateLabel}</span>
+        {projectionYears > 0 && <span className="text-indigo-600"> · Projected</span>}
+      </div>
+    </div>
+  );
+}
+
+function CompactAlertStrip({
+  projectionYears,
+  displayDateLabel,
+  warnings,
+}: {
+  projectionYears: number;
+  displayDateLabel: string;
+  warnings: string[];
 }) {
   return (
-    <div className="max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-      <div className="flex items-center gap-2 text-sm text-slate-600">
-        <CalendarRange size={16} className="text-indigo-600 flex-shrink-0" />
-        <span>
-          As of <span className="font-semibold text-slate-900">{displayDateLabel}</span>
-          {projectionYears > 0 && (
-            <span className="ml-2 inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700 border border-indigo-100">
-              Projected
+    <div className="flex-none border-b border-slate-200 bg-slate-50 px-2 py-1.5 print:hidden space-y-1">
+      {projectionYears > 0 && (
+        <details className="group rounded-md border border-indigo-200/80 bg-indigo-50/80 open:bg-indigo-50">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-2.5 py-1.5 text-xs font-medium text-indigo-900 [&::-webkit-details-marker]:hidden">
+            <Activity size={14} className="flex-shrink-0 text-indigo-600" />
+            <span className="flex-1 min-w-0 truncate">
+              {getProjectionLabel(projectionYears)} · As of {displayDateLabel}
             </span>
-          )}
-        </span>
-      </div>
-      <div className="flex items-center gap-2">
-        <label htmlFor="report-period-select" className="text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
-          View
-        </label>
-        <select
-          id="report-period-select"
-          value={projectionYears}
-          onChange={(e) => onChange(Number(e.target.value))}
-          disabled={!statementDate}
-          className="min-w-[200px] px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 text-sm font-medium disabled:opacity-50"
-        >
-          {Array.from({ length: MAX_PROJECTION_YEARS + 1 }, (_, years) => (
-            <option key={years} value={years}>
-              {getProjectionLabel(years)}
-            </option>
-          ))}
-        </select>
-      </div>
+            <span className="text-[10px] uppercase tracking-wide text-indigo-500 flex-shrink-0 group-open:hidden">Details</span>
+          </summary>
+          <p className="px-2.5 pb-2 text-[11px] leading-relaxed text-indigo-900/90">
+            Each year rolls inventory, equity, cash, tax payable, and 10% fixed-asset depreciation forward.
+            Sales and expenses stay the same. Bank working capital loan is recalculated each period.
+          </p>
+        </details>
+      )}
+      {warnings.map((warning) => (
+        <details key={warning} className="group rounded-md border border-amber-200/80 bg-amber-50/80 open:bg-amber-50">
+          <summary className="flex cursor-pointer list-none items-start gap-2 px-2.5 py-1.5 text-xs text-amber-900 [&::-webkit-details-marker]:hidden">
+            <AlertTriangle size={14} className="mt-0.5 flex-shrink-0 text-amber-600" />
+            <span className="flex-1 min-w-0 line-clamp-1 group-open:line-clamp-none">{warning}</span>
+            <span className="text-[10px] uppercase tracking-wide text-amber-600 flex-shrink-0 group-open:hidden">Details</span>
+          </summary>
+          <p className="px-2.5 pb-2 pl-7 text-[11px] leading-relaxed text-amber-900/90">{warning}</p>
+        </details>
+      ))}
     </div>
   );
 }
@@ -711,31 +758,28 @@ function ReportStatementHeader({
   title,
   displayDateLabel,
   projectionYears,
+  forExport = false,
 }: {
   companyName: string;
   title: string;
   displayDateLabel: string;
   projectionYears: number;
+  forExport?: boolean;
 }) {
   return (
-    <div className="text-center mb-8">
-      <h1 className="text-xl font-bold uppercase tracking-wide text-slate-900">{companyName || 'COMPANY NAME'}</h1>
-      <h2 className="text-lg font-semibold uppercase tracking-wide text-slate-800 mt-1">{title}</h2>
-      <p className="text-sm font-medium text-slate-600 uppercase mt-1">
+    <div className={`text-center ${forExport ? 'mb-6' : 'mb-4 md:mb-6 print:mb-8'}`}>
+      <h1 className="text-base sm:text-lg md:text-xl font-bold uppercase tracking-wide text-slate-900">
+        {companyName || 'COMPANY NAME'}
+      </h1>
+      <h2 className="text-sm sm:text-base md:text-lg font-semibold uppercase tracking-wide text-slate-800 mt-0.5">
+        {title}
+      </h2>
+      <p className={`text-sm font-medium text-slate-600 uppercase mt-1 ${forExport ? 'block' : 'hidden print:block'}`}>
         As of {displayDateLabel}
         {projectionYears > 0 && (
           <span className="ml-2 normal-case text-indigo-600">(Projected)</span>
         )}
       </p>
-    </div>
-  );
-}
-
-function ValidationBanner({ message }: { message: string }) {
-  return (
-    <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-      <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-amber-600" />
-      <p>{message}</p>
     </div>
   );
 }
