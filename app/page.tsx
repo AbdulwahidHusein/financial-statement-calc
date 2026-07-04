@@ -147,7 +147,7 @@ export default function FinancialApp() {
 
   return (
     <div className="h-screen flex flex-col bg-slate-50 text-slate-900 font-sans overflow-hidden print:h-auto print:overflow-visible print:bg-white">
-      <header className="flex-none bg-white border-b border-slate-200 px-3 md:px-6 py-2.5 md:py-3 flex items-center justify-between sticky top-0 z-10 print:hidden">
+      <header className="flex-none bg-white border-b border-slate-200 px-3 md:px-6 py-2.5 md:py-3 flex items-center justify-between sticky top-0 z-40 print:hidden">
         <div className="flex items-center gap-2 md:gap-3 min-w-0">
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -195,10 +195,21 @@ export default function FinancialApp() {
 
         {/* Left Column: Data Entry */}
         <div
-          className={`fixed xl:relative inset-y-0 left-0 z-30 xl:z-auto w-full max-w-[450px] xl:w-[450px] flex-none flex-col space-y-6 print:hidden xl:h-full xl:overflow-y-auto xl:pr-2 xl:pb-6 custom-scrollbar bg-slate-50 xl:bg-transparent p-4 md:p-0 pt-20 xl:pt-0 overflow-y-auto transition-transform duration-200 ease-in-out ${
+          className={`fixed xl:relative inset-y-0 left-0 z-30 xl:z-auto w-full max-w-[450px] xl:w-[450px] flex-none flex-col space-y-4 xl:space-y-6 print:hidden xl:h-full xl:overflow-y-auto xl:pr-2 xl:pb-6 custom-scrollbar bg-slate-50 xl:bg-transparent p-4 md:p-0 pt-16 xl:pt-0 overflow-y-auto transition-transform duration-200 ease-in-out ${
             isSidebarOpen ? 'translate-x-0 flex' : '-translate-x-full xl:translate-x-0 hidden xl:flex'
           }`}
         >
+          <div className="xl:hidden sticky top-0 z-10 -mx-4 px-4 py-2 mb-1 flex items-center justify-between border-b border-slate-200 bg-slate-50">
+            <span className="text-sm font-semibold text-slate-800">Enter Data</span>
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen(false)}
+              className="p-2 -mr-2 text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
+              aria-label="Close data entry panel"
+            >
+              <X size={20} />
+            </button>
+          </div>
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex-shrink-0 overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-100 bg-slate-50">
               <h2 className="font-semibold text-slate-800 flex items-center gap-2">
