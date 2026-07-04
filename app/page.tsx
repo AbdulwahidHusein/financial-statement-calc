@@ -1,42 +1,16 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
-import { Calculator, DollarSign, FileText, Printer, Briefcase, Activity, PieChart, TrendingUp, LineChart, Menu, X, Download, AlertTriangle, Loader2 } from 'lucide-react';
+import React, { useMemo, useRef, useState } from 'react';
+import { Calculator, DollarSign, FileText, Printer, Briefcase, Activity, PieChart, TrendingUp, LineChart, Menu, X, Download, AlertTriangle, Loader2, CalendarRange } from 'lucide-react';
 import { exportElementToPdf, getExportDateParts } from '@/lib/export-pdf';
-
-type FinancialData = {
-  companyName: string;
-  statementDate: string;
-  // Income Statement
-  sales: number;
-  beginningInventory: number;
-  purchases: number;
-  endingInventory: number;
-  salaryAndBenefit: number;
-  transportationCost: number;
-  loadingAndUnloading: number;
-  repairAndMaintenance: number;
-  stationaryAndPrinting: number;
-  miscellaneousExpense: number;
-  profitTax: number;
-
-  // Balance Sheet - Assets
-  cashOnBank: number;
-  otherReceivables: number;
-  building: number;
-  propertyAndEquipment: number;
-  vehicle: number;
-  accumulatedDepreciation: number;
-
-  // Balance Sheet - Liabilities & Equity
-  employeeBenefitPayable: number;
-  creditPurchasePayable: number;
-  outstandingFinancing: number;
-  profitTaxPayable: number;
-  beginningCapital: number;
-  reservedCapital: number;
-  bankWorkingCapitalFinancing: number;
-};
+import {
+  type FinancialData,
+  MAX_PROJECTION_YEARS,
+  calculateFinancials,
+  getProjectionLabel,
+  projectFinancialData,
+  shiftStatementDate,
+} from '@/lib/finance';
 
 const initialData: FinancialData = {
   companyName: '',
@@ -64,7 +38,6 @@ const initialData: FinancialData = {
   profitTaxPayable: 0,
   beginningCapital: 0,
   reservedCapital: 0,
-  bankWorkingCapitalFinancing: 0,
 };
 
 const formatCurrency = (amount: number) => {
@@ -95,10 +68,20 @@ const getStatementYear = (dateStr: string) => {
 export default function FinancialApp() {
   const [data, setData] = useState<FinancialData>(initialData);
   const [activeTab, setActiveTab] = useState<'income' | 'balance' | 'ratios'>('income');
+  const [projectionYears, setProjectionYears] = useState(0);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const reportContainerRef = useRef<HTMLDivElement>(null);
+
+  const displayData = useMemo(
+    () => projectFinancialData(data, projectionYears),
+    [data, projectionYears]
+  );
+  const calc = useMemo(() => calculateFinancials(displayData), [displayData]);
+  const displayDateLabel = displayData.statementDate
+    ? formatStatementDate(displayData.statementDate)
+    : 'DATE';
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -106,6 +89,9 @@ export default function FinancialApp() {
       ...prev,
       [name]: value,
     }));
+    if (name === 'statementDate' && !value) {
+      setProjectionYears(0);
+    }
   };
 
   const handleNumberChange = (name: keyof FinancialData, value: number) => {
@@ -115,61 +101,17 @@ export default function FinancialApp() {
     }));
   };
 
-  // Calculations
-  const goodsAvailableForSales = data.beginningInventory + data.purchases;
-  const cogs = goodsAvailableForSales - data.endingInventory;
-  const grossProfit = data.sales - cogs;
-
-  const totalExpenses =
-    data.salaryAndBenefit +
-    data.transportationCost +
-    data.loadingAndUnloading +
-    data.repairAndMaintenance +
-    data.stationaryAndPrinting +
-    data.miscellaneousExpense;
-
-  const incomeBeforeTax = grossProfit - totalExpenses;
-  const netIncome = incomeBeforeTax - data.profitTax;
-
-  // Balance sheet inventory matches P&L ending inventory
-  const inventory = data.endingInventory;
-  const totalCurrentAssets = data.cashOnBank + inventory + data.otherReceivables;
-  const netFixedAssets = data.building + data.propertyAndEquipment + data.vehicle - data.accumulatedDepreciation;
-  const totalAssets = totalCurrentAssets + netFixedAssets;
-
-  const operatingCurrentLiabilities =
-    data.employeeBenefitPayable +
-    data.creditPurchasePayable +
-    data.outstandingFinancing +
-    data.profitTaxPayable;
-
-  const totalCurrentLiabilities = operatingCurrentLiabilities + data.bankWorkingCapitalFinancing;
-  const totalLiability = totalCurrentLiabilities;
-  const totalCapital = data.beginningCapital + netIncome + data.reservedCapital;
-  const totalLiabilityAndEquity = totalLiability + totalCapital;
-
-  // Ratios
-  const netWorkingCapital = totalCurrentAssets - totalCurrentLiabilities;
-  const grossWorkingCapital = totalCurrentAssets - operatingCurrentLiabilities;
-  const businessFundedWorkingCapital = grossWorkingCapital - data.bankWorkingCapitalFinancing;
-  const currentRatio = totalCurrentLiabilities > 0 ? totalCurrentAssets / totalCurrentLiabilities : null;
-  const debtToEquity = totalCapital > 0 ? totalLiability / totalCapital : 0;
-  const grossProfitMargin = data.sales > 0 ? (grossProfit / data.sales) * 100 : 0;
-  const netProfitMargin = data.sales > 0 ? (netIncome / data.sales) * 100 : 0;
-  const returnOnAssets = totalAssets > 0 ? (netIncome / totalAssets) * 100 : 0;
-  const returnOnEquity = totalCapital > 0 ? (netIncome / totalCapital) * 100 : 0;
-
   const warnings: string[] = [];
-  if (cogs < 0) {
+  if (calc.cogs < 0) {
     warnings.push('Cost of goods sold is negative — ending inventory exceeds goods available for sale.');
   }
-  if (netFixedAssets < 0) {
+  if (calc.netFixedAssets < 0) {
     warnings.push('Net fixed assets is negative — accumulated depreciation exceeds fixed asset values.');
   }
-  const balanceSheetDifference = totalAssets - totalLiabilityAndEquity;
+  const balanceSheetDifference = calc.totalAssets - calc.totalLiabilityAndEquity;
   if (Math.abs(balanceSheetDifference) > 0.005) {
     warnings.push(
-      `Balance sheet is out of balance by ${formatBirr(Math.abs(balanceSheetDifference))}. Total assets (${formatBirr(totalAssets)}) does not equal total liabilities and equity (${formatBirr(totalLiabilityAndEquity)}).`
+      `Balance sheet is out of balance by ${formatBirr(Math.abs(balanceSheetDifference))}. Total assets (${formatBirr(calc.totalAssets)}) does not equal total liabilities and equity (${formatBirr(calc.totalLiabilityAndEquity)}).`
     );
   }
 
@@ -190,7 +132,7 @@ export default function FinancialApp() {
       await exportElementToPdf({
         element: reportContainerRef.current,
         companyName: data.companyName,
-        currentDateLabel,
+        currentDateLabel: displayDateLabel,
         fileDate,
       });
     } catch (error) {
@@ -284,6 +226,11 @@ export default function FinancialApp() {
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm font-medium"
                 />
               </div>
+              <StatementPeriodSelector
+                statementDate={data.statementDate}
+                projectionYears={projectionYears}
+                onChange={setProjectionYears}
+              />
             </div>
           </div>
 
@@ -362,12 +309,12 @@ export default function FinancialApp() {
               </div>
 
               <div className="pt-2 border-t border-slate-100">
-                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Equity & Financing</h3>
+                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Equity</h3>
                 <div className="space-y-3">
                   <InputField label="Beginning Capital" name="beginningCapital" value={data.beginningCapital} onChange={handleNumberChange} />
                   <InputField label="Reserved Capital" name="reservedCapital" value={data.reservedCapital} onChange={handleNumberChange} />
-                  <InputField label="Bank Working Capital Loan" name="bankWorkingCapitalFinancing" value={data.bankWorkingCapitalFinancing} onChange={handleNumberChange} />
                 </div>
+                <p className="text-xs text-slate-400 mt-2">Bank working capital loan is calculated on the balance sheet.</p>
               </div>
             </div>
           </div>
@@ -375,6 +322,13 @@ export default function FinancialApp() {
 
         {/* Right Column: Generated Reports */}
         <div className="flex-1 flex flex-col min-w-0 print:block xl:h-full xl:pb-6 print:h-auto print:overflow-visible">
+          {projectionYears > 0 && (
+            <div className="mb-4 print:hidden rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+              Viewing <strong>{getProjectionLabel(projectionYears).toLowerCase()}</strong> — values roll forward each year
+              (inventory, equity, cash, tax payable, and 10% depreciation on fixed assets). Sales and expenses stay the same.
+              Bank working capital loan is recalculated from each projected balance sheet.
+            </div>
+          )}
           {warnings.length > 0 && (
             <div className="mb-4 print:hidden space-y-2">
               {warnings.map((warning) => (
@@ -409,6 +363,15 @@ export default function FinancialApp() {
               </button>
             </div>
 
+            <div className="px-4 md:px-6 py-3 border-b border-slate-200 bg-white print:hidden">
+              <StatementPeriodBar
+                statementDate={data.statementDate}
+                projectionYears={projectionYears}
+                displayDateLabel={displayDateLabel}
+                onChange={setProjectionYears}
+              />
+            </div>
+
             {/* Document Content */}
             <div
               ref={reportContainerRef}
@@ -423,20 +386,20 @@ export default function FinancialApp() {
                     {data.companyName || 'Financial Report'}
                   </h1>
                   <p className="text-sm font-medium text-slate-600 mt-2">
-                    {getExportDateParts().currentDateLabel}
+                    {displayDateLabel}
+                    {projectionYears > 0 ? ' (Projected)' : ''}
                   </p>
                 </div>
               )}
 
               <div className={activeTab === 'income' || isExportingPdf ? 'block print:block' : 'hidden print:block'}>
                 <div className="max-w-4xl mx-auto mb-16 print:mb-24">
-                  <div className="text-center mb-8">
-                    <h1 className="text-xl font-bold uppercase tracking-wide text-slate-900">{data.companyName || 'COMPANY NAME'}</h1>
-                    <h2 className="text-lg font-semibold uppercase tracking-wide text-slate-800 mt-1">Profit And Loss Statement</h2>
-                    <p className="text-sm font-medium text-slate-600 uppercase mt-1">
-                      As of {data.statementDate ? formatStatementDate(data.statementDate) : 'DATE'}
-                    </p>
-                  </div>
+                  <ReportStatementHeader
+                    companyName={displayData.companyName}
+                    title="Profit And Loss Statement"
+                    displayDateLabel={displayDateLabel}
+                    projectionYears={projectionYears}
+                  />
 
                   <div className="w-full border border-slate-800 border-collapse">
                     <div className="grid grid-cols-12 border-b border-slate-800 bg-slate-50">
@@ -444,53 +407,52 @@ export default function FinancialApp() {
                       <div className="col-span-4 p-2 font-bold text-sm text-right">Amounts in (Birr)</div>
                     </div>
 
-                    <ReportRow label="SALES" value={data.sales} />
-                    <ReportRow label="Total Revenue" value={data.sales} isBold isSubtotal />
+                    <ReportRow label="SALES" value={displayData.sales} />
+                    <ReportRow label="Total Revenue" value={displayData.sales} isBold isSubtotal />
 
-                    <ReportRow label="Beginning Inventory" value={data.beginningInventory} />
-                    <ReportRow label="PURCHASE" value={data.purchases} />
-                    <ReportRow label="Goods available for sales" value={goodsAvailableForSales} />
-                    <ReportRow label="Less: Ending Inventory" value={data.endingInventory} isDeduction />
+                    <ReportRow label="Beginning Inventory" value={displayData.beginningInventory} />
+                    <ReportRow label="PURCHASE" value={displayData.purchases} />
+                    <ReportRow label="Goods available for sales" value={calc.goodsAvailableForSales} />
+                    <ReportRow label="Less: Ending Inventory" value={displayData.endingInventory} isDeduction />
 
-                    <ReportRow label="Cost of goods sold" value={cogs} isBold isSubtotal />
-                    <ReportRow label="Gross Profit" value={grossProfit} isBold isTotal />
+                    <ReportRow label="Cost of goods sold" value={calc.cogs} isBold isSubtotal />
+                    <ReportRow label="Gross Profit" value={calc.grossProfit} isBold isTotal />
 
                     <div className="grid grid-cols-12 border-b border-slate-800">
                       <div className="col-span-12 p-2 font-bold text-sm">General & Administration Expense</div>
                     </div>
 
-                    <ReportRow label="Salary and benefit" value={data.salaryAndBenefit} indent />
-                    <ReportRow label="TRANSPORTATION COST" value={data.transportationCost} indent />
-                    <ReportRow label="LOADING AND UNLOADING" value={data.loadingAndUnloading} indent />
-                    <ReportRow label="repair and maintenance expense" value={data.repairAndMaintenance} indent />
-                    <ReportRow label="Stationary and printing" value={data.stationaryAndPrinting} indent />
-                    <ReportRow label="Miscellanies & other expense" value={data.miscellaneousExpense} indent />
+                    <ReportRow label="Salary and benefit" value={displayData.salaryAndBenefit} indent />
+                    <ReportRow label="TRANSPORTATION COST" value={displayData.transportationCost} indent />
+                    <ReportRow label="LOADING AND UNLOADING" value={displayData.loadingAndUnloading} indent />
+                    <ReportRow label="repair and maintenance expense" value={displayData.repairAndMaintenance} indent />
+                    <ReportRow label="Stationary and printing" value={displayData.stationaryAndPrinting} indent />
+                    <ReportRow label="Miscellanies & other expense" value={displayData.miscellaneousExpense} indent />
 
-                    <ReportRow label="Total expense" value={totalExpenses} isBold isSubtotal />
+                    <ReportRow label="Total expense" value={calc.totalExpenses} isBold isSubtotal />
 
-                    <ReportRow label="Income before profit tax" value={incomeBeforeTax} />
-                    <ReportRow label="Profit tax" value={data.profitTax} />
+                    <ReportRow label="Income before profit tax" value={calc.incomeBeforeTax} />
+                    <ReportRow label="Profit tax" value={displayData.profitTax} />
 
-                    <ReportRow label="Net income/Loss" value={netIncome} isBold isTotal />
+                    <ReportRow label="Net income/Loss" value={calc.netIncome} isBold isTotal />
                   </div>
                 </div>
               </div>
 
               <div className={`${isExportingPdf ? 'break-before-page mt-16' : ''} print:break-before-page ${activeTab === 'balance' || isExportingPdf ? 'block print:block' : 'hidden print:block'}`}>
                 <div className="max-w-4xl mx-auto mb-16 print:mb-24">
-                  <div className="text-center mb-8">
-                    <h1 className="text-xl font-bold uppercase tracking-wide text-slate-900">{data.companyName || 'COMPANY NAME'}</h1>
-                    <h2 className="text-lg font-semibold uppercase tracking-wide text-slate-800 mt-1">Balance Sheet</h2>
-                    <p className="text-sm font-medium text-slate-600 uppercase mt-1">
-                      As of {data.statementDate ? formatStatementDate(data.statementDate) : 'DATE'}
-                    </p>
-                  </div>
+                  <ReportStatementHeader
+                    companyName={displayData.companyName}
+                    title="Balance Sheet"
+                    displayDateLabel={displayDateLabel}
+                    projectionYears={projectionYears}
+                  />
 
                   <div className="w-full border border-slate-800 border-collapse">
                     <div className="grid grid-cols-12 border-b border-slate-800 bg-slate-50">
                       <div className="col-span-8 p-2 font-bold text-sm border-r border-slate-800">Description</div>
                       <div className="col-span-4 p-2 font-bold text-sm text-right">
-                        {data.statementDate ? getStatementYear(data.statementDate) : 'Year'}
+                        {displayData.statementDate ? getStatementYear(displayData.statementDate) : 'Year'}
                       </div>
                     </div>
 
@@ -501,61 +463,60 @@ export default function FinancialApp() {
                       <div className="col-span-12 p-2 font-bold text-sm">CURRENT ASSET</div>
                     </div>
 
-                    <ReportRow label="CASH ON HAND /BANK" value={data.cashOnBank} />
-                    <ReportRow label="INVENTORY" value={inventory} />
-                    <ReportRow label="OTHER RECIEVABLES" value={data.otherReceivables} />
+                    <ReportRow label="CASH ON HAND /BANK" value={displayData.cashOnBank} />
+                    <ReportRow label="INVENTORY" value={calc.inventory} />
+                    <ReportRow label="OTHER RECIEVABLES" value={displayData.otherReceivables} />
 
-                    <ReportRow label="TOTAL CURRENT ASSET" value={totalCurrentAssets} isBold isSubtotal />
+                    <ReportRow label="TOTAL CURRENT ASSET" value={calc.totalCurrentAssets} isBold isSubtotal />
 
                     <div className="grid grid-cols-12 border-b border-slate-800">
                       <div className="col-span-12 p-2 font-bold text-sm">FIXED ASSET</div>
                     </div>
 
-                    <ReportRow label="BUILDING" value={data.building} />
-                    <ReportRow label="PROPERTY AND EQUIPMENT" value={data.propertyAndEquipment} />
-                    <ReportRow label="VEHICLE" value={data.vehicle} />
-                    <ReportRow label="LESS ACC. DEP BULG. PROP & VEH" value={data.accumulatedDepreciation} isDeduction />
+                    <ReportRow label="BUILDING" value={displayData.building} />
+                    <ReportRow label="PROPERTY AND EQUIPMENT" value={displayData.propertyAndEquipment} />
+                    <ReportRow label="VEHICLE" value={displayData.vehicle} />
+                    <ReportRow label="LESS ACC. DEP BULG. PROP & VEH" value={displayData.accumulatedDepreciation} isDeduction />
 
-                    <ReportRow label="NET FIXED ASSET" value={netFixedAssets} isBold isSubtotal />
+                    <ReportRow label="NET FIXED ASSET" value={calc.netFixedAssets} isBold isSubtotal />
 
-                    <ReportRow label="TOTAL ASSET" value={totalAssets} isBold isTotal />
+                    <ReportRow label="TOTAL ASSET" value={calc.totalAssets} isBold isTotal />
 
                     <div className="grid grid-cols-12 border-b border-slate-800">
                       <div className="col-span-12 p-2 font-bold text-sm">LIABILITY</div>
                     </div>
 
-                    <ReportRow label="EMPLOYEE BENEFIT/SALARY" value={data.employeeBenefitPayable} />
-                    <ReportRow label="CREDIT PURCHASE PAYABLE" value={data.creditPurchasePayable} />
-                    <ReportRow label="OUTSTANDING FINANCING" value={data.outstandingFinancing} />
-                    <ReportRow label="PROFIT TAX PAYABLE" value={data.profitTaxPayable} />
-                    <ReportRow label="BANK WORKING CAPITAL LOAN" value={data.bankWorkingCapitalFinancing} />
+                    <ReportRow label="EMPLOYEE BENEFIT/SALARY" value={displayData.employeeBenefitPayable} />
+                    <ReportRow label="CREDIT PURCHASE PAYABLE" value={displayData.creditPurchasePayable} />
+                    <ReportRow label="OUTSTANDING FINANCING" value={displayData.outstandingFinancing} />
+                    <ReportRow label="PROFIT TAX PAYABLE" value={displayData.profitTaxPayable} />
+                    <ReportRow label="BANK WORKING CAPITAL LOAN" value={calc.bankWorkingCapitalFinancing} />
 
-                    <ReportRow label="TOTAL LIABILITY" value={totalLiability} isBold isSubtotal />
+                    <ReportRow label="TOTAL LIABILITY" value={calc.totalLiability} isBold isSubtotal />
 
                     <div className="grid grid-cols-12 border-b border-slate-800">
                       <div className="col-span-12 p-2 font-bold text-sm">EQUITY</div>
                     </div>
 
-                    <ReportRow label="BEG. CAPITAL" value={data.beginningCapital} />
-                    <ReportRow label="NET PROFIT" value={netIncome} />
-                    <ReportRow label="RESERVED CAPITAL" value={data.reservedCapital} />
+                    <ReportRow label="BEG. CAPITAL" value={displayData.beginningCapital} />
+                    <ReportRow label="NET PROFIT" value={calc.netIncome} />
+                    <ReportRow label="RESERVED CAPITAL" value={displayData.reservedCapital} />
 
-                    <ReportRow label="TOTAL CAPITAL" value={totalCapital} isBold isSubtotal />
+                    <ReportRow label="TOTAL CAPITAL" value={calc.totalCapital} isBold isSubtotal />
 
-                    <ReportRow label="TOTAL LIABILITY AND EQUITY" value={totalLiabilityAndEquity} isBold isTotal />
+                    <ReportRow label="TOTAL LIABILITY AND EQUITY" value={calc.totalLiabilityAndEquity} isBold isTotal />
                   </div>
                 </div>
               </div>
 
               <div className={`${isExportingPdf ? 'break-before-page mt-16' : ''} print:break-before-page ${activeTab === 'ratios' || isExportingPdf ? 'block print:block' : 'hidden print:block'}`}>
                 <div className="max-w-4xl mx-auto mb-16 print:mb-24">
-                  <div className="text-center mb-10">
-                    <h1 className="text-xl font-bold uppercase tracking-wide text-slate-900">{data.companyName || 'COMPANY NAME'}</h1>
-                    <h2 className="text-lg font-semibold uppercase tracking-wide text-slate-800 mt-1">Financial Ratios & Metrics</h2>
-                    <p className="text-sm font-medium text-slate-600 uppercase mt-1">
-                      As of {data.statementDate ? formatStatementDate(data.statementDate) : 'DATE'}
-                    </p>
-                  </div>
+                  <ReportStatementHeader
+                    companyName={displayData.companyName}
+                    title="Financial Ratios & Metrics"
+                    displayDateLabel={displayDateLabel}
+                    projectionYears={projectionYears}
+                  />
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 print:grid-cols-2">
                     <div className="col-span-1 md:col-span-2">
@@ -565,24 +526,26 @@ export default function FinancialApp() {
                             <div className="p-2 bg-slate-50 rounded-lg print:bg-transparent print:p-0">
                               <Briefcase className="text-blue-500" size={24} />
                             </div>
-                            <span className={`text-xs font-semibold px-2 py-1 rounded-full print:px-0 ${netWorkingCapital > 0 ? 'bg-emerald-100 text-emerald-700 print:bg-transparent print:text-emerald-800' : 'bg-rose-100 text-rose-700 print:bg-transparent print:text-rose-800'}`}>
-                              {netWorkingCapital > 0 ? 'Healthy' : 'Needs Attention'}
+                            <span className={`text-xs font-semibold px-2 py-1 rounded-full print:px-0 ${calc.netWorkingCapital > 0 ? 'bg-emerald-100 text-emerald-700 print:bg-transparent print:text-emerald-800' : 'bg-rose-100 text-rose-700 print:bg-transparent print:text-rose-800'}`}>
+                              {calc.netWorkingCapital > 0 ? 'Healthy' : 'Needs Attention'}
                             </span>
                           </div>
                           <h3 className="text-slate-500 font-semibold text-sm uppercase tracking-wider mb-1 print:text-slate-600">Net Working Capital</h3>
-                          <div className="text-3xl font-bold text-slate-900 mb-2 print:text-2xl">{formatBirr(netWorkingCapital)}</div>
+                          <div className="text-3xl font-bold text-slate-900 mb-2 print:text-2xl">{formatBirr(calc.netWorkingCapital)}</div>
                           <p className="text-slate-500 text-sm leading-relaxed print:text-slate-600">Current assets minus all current liabilities, including bank working capital loan</p>
+                          <p className="text-xs text-slate-400 mt-2 print:text-slate-500">Healthy: positive working capital</p>
                         </div>
                         <div className="w-px bg-slate-200 hidden md:block print:block"></div>
                         <div className="h-px bg-slate-200 block md:hidden print:hidden"></div>
                         <div className="flex-1 flex flex-col justify-center space-y-4">
                           <div>
                             <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Financed by Bank</div>
-                            <div className="text-xl font-bold text-slate-800">{formatBirr(data.bankWorkingCapitalFinancing)}</div>
+                            <div className="text-xl font-bold text-slate-800">{formatBirr(calc.bankWorkingCapitalFinancing)}</div>
+                            <p className="text-xs text-slate-400 mt-1">Calculated from balance sheet</p>
                           </div>
                           <div>
                             <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Financed by Business</div>
-                            <div className="text-xl font-bold text-slate-800">{formatBirr(businessFundedWorkingCapital)}</div>
+                            <div className="text-xl font-bold text-slate-800">{formatBirr(calc.businessFundedWorkingCapital)}</div>
                           </div>
                         </div>
                       </div>
@@ -590,46 +553,56 @@ export default function FinancialApp() {
 
                     <RatioCard
                       title="Current Ratio"
-                      value={currentRatio !== null ? `${currentRatio.toFixed(2)}x` : 'N/A'}
-                      description={currentRatio !== null ? 'Current assets divided by current liabilities' : 'Cannot calculate — no current liabilities entered'}
+                      value={calc.currentRatio !== null ? `${calc.currentRatio.toFixed(2)}x` : 'N/A'}
+                      healthyBenchmark="≥ 1.5x"
+                      description={calc.currentRatio !== null ? 'Current assets divided by current liabilities' : 'Cannot calculate — no current liabilities entered'}
                       icon={<Activity className="text-indigo-500" size={24} />}
-                      trend={currentRatio !== null ? (currentRatio >= 1 ? 'positive' : 'negative') : undefined}
+                      trend={calc.currentRatio !== null ? (calc.currentRatio >= 1.5 ? 'positive' : calc.currentRatio >= 1 ? 'neutral' : 'negative') : undefined}
                     />
 
                     <RatioCard
                       title="Debt to Equity Ratio"
-                      value={`${debtToEquity.toFixed(2)}x`}
+                      value={`${calc.debtToEquity.toFixed(2)}x`}
+                      healthyBenchmark="≤ 1.0x"
                       description="Total liabilities divided by total equity"
                       icon={<PieChart className="text-orange-500" size={24} />}
+                      trend={calc.debtToEquity <= 1 ? 'positive' : calc.debtToEquity <= 2 ? 'neutral' : 'negative'}
                     />
 
                     <RatioCard
                       title="Gross Profit Margin"
-                      value={`${grossProfitMargin.toFixed(1)}%`}
+                      value={`${calc.grossProfitMargin.toFixed(1)}%`}
+                      healthyBenchmark="≥ 30%"
                       description="Gross profit as a percentage of sales"
                       icon={<LineChart className="text-emerald-500" size={24} />}
+                      trend={calc.grossProfitMargin >= 30 ? 'positive' : calc.grossProfitMargin >= 15 ? 'neutral' : 'negative'}
                     />
 
                     <RatioCard
                       title="Net Profit Margin"
-                      value={`${netProfitMargin.toFixed(1)}%`}
+                      value={`${calc.netProfitMargin.toFixed(1)}%`}
+                      healthyBenchmark="≥ 10%"
                       description="Net income as a percentage of sales"
                       icon={<TrendingUp className="text-emerald-500" size={24} />}
-                      trend={netProfitMargin > 0 ? 'positive' : 'negative'}
+                      trend={calc.netProfitMargin >= 10 ? 'positive' : calc.netProfitMargin > 0 ? 'neutral' : 'negative'}
                     />
 
                     <RatioCard
                       title="Return on Assets (ROA)"
-                      value={`${returnOnAssets.toFixed(1)}%`}
+                      value={`${calc.returnOnAssets.toFixed(1)}%`}
+                      healthyBenchmark="≥ 5%"
                       description="Net income relative to total assets"
                       icon={<TrendingUp className="text-purple-500" size={24} />}
+                      trend={calc.returnOnAssets >= 5 ? 'positive' : calc.returnOnAssets >= 2 ? 'neutral' : 'negative'}
                     />
 
                     <RatioCard
                       title="Return on Equity (ROE)"
-                      value={`${returnOnEquity.toFixed(1)}%`}
+                      value={`${calc.returnOnEquity.toFixed(1)}%`}
+                      healthyBenchmark="≥ 15%"
                       description="Net income relative to total equity"
                       icon={<TrendingUp className="text-pink-500" size={24} />}
+                      trend={calc.returnOnEquity >= 15 ? 'positive' : calc.returnOnEquity >= 8 ? 'neutral' : 'negative'}
                     />
                   </div>
                 </div>
@@ -638,6 +611,124 @@ export default function FinancialApp() {
           </div>
         </div>
       </main>
+    </div>
+  );
+}
+
+function StatementPeriodSelector({
+  statementDate,
+  projectionYears,
+  onChange,
+}: {
+  statementDate: string;
+  projectionYears: number;
+  onChange: (years: number) => void;
+}) {
+  const options = Array.from({ length: MAX_PROJECTION_YEARS + 1 }, (_, years) => {
+    const dateLabel = statementDate
+      ? formatStatementDate(shiftStatementDate(statementDate, years))
+      : null;
+
+    return {
+      years,
+      label:
+        years === 0
+          ? `Current period${dateLabel ? ` (${dateLabel})` : ''}`
+          : `${getProjectionLabel(years)}${dateLabel ? ` — ${dateLabel}` : ''}`,
+    };
+  });
+
+  return (
+    <div>
+      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+        View Period
+      </label>
+      <select
+        value={projectionYears}
+        onChange={(e) => onChange(Number(e.target.value))}
+        disabled={!statementDate}
+        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {options.map((option) => (
+          <option key={option.years} value={option.years}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      {!statementDate && (
+        <p className="text-xs text-slate-400 mt-1.5">Set a statement date to view future periods.</p>
+      )}
+    </div>
+  );
+}
+
+function StatementPeriodBar({
+  statementDate,
+  projectionYears,
+  displayDateLabel,
+  onChange,
+}: {
+  statementDate: string;
+  projectionYears: number;
+  displayDateLabel: string;
+  onChange: (years: number) => void;
+}) {
+  return (
+    <div className="max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="flex items-center gap-2 text-sm text-slate-600">
+        <CalendarRange size={16} className="text-indigo-600 flex-shrink-0" />
+        <span>
+          As of <span className="font-semibold text-slate-900">{displayDateLabel}</span>
+          {projectionYears > 0 && (
+            <span className="ml-2 inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700 border border-indigo-100">
+              Projected
+            </span>
+          )}
+        </span>
+      </div>
+      <div className="flex items-center gap-2">
+        <label htmlFor="report-period-select" className="text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
+          View
+        </label>
+        <select
+          id="report-period-select"
+          value={projectionYears}
+          onChange={(e) => onChange(Number(e.target.value))}
+          disabled={!statementDate}
+          className="min-w-[200px] px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 text-sm font-medium disabled:opacity-50"
+        >
+          {Array.from({ length: MAX_PROJECTION_YEARS + 1 }, (_, years) => (
+            <option key={years} value={years}>
+              {getProjectionLabel(years)}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+function ReportStatementHeader({
+  companyName,
+  title,
+  displayDateLabel,
+  projectionYears,
+}: {
+  companyName: string;
+  title: string;
+  displayDateLabel: string;
+  projectionYears: number;
+}) {
+  return (
+    <div className="text-center mb-8">
+      <h1 className="text-xl font-bold uppercase tracking-wide text-slate-900">{companyName || 'COMPANY NAME'}</h1>
+      <h2 className="text-lg font-semibold uppercase tracking-wide text-slate-800 mt-1">{title}</h2>
+      <p className="text-sm font-medium text-slate-600 uppercase mt-1">
+        As of {displayDateLabel}
+        {projectionYears > 0 && (
+          <span className="ml-2 normal-case text-indigo-600">(Projected)</span>
+        )}
+      </p>
     </div>
   );
 }
@@ -738,28 +829,42 @@ function ReportRow({
 function RatioCard({
   title,
   value,
+  healthyBenchmark,
   description,
   icon,
   trend,
 }: {
   title: string;
   value: string;
+  healthyBenchmark: string;
   description: string;
   icon: React.ReactNode;
-  trend?: 'positive' | 'negative';
+  trend?: 'positive' | 'neutral' | 'negative';
 }) {
+  const trendLabel =
+    trend === 'positive' ? 'Healthy' : trend === 'neutral' ? 'Fair' : trend === 'negative' ? 'Needs Attention' : null;
+  const trendClass =
+    trend === 'positive'
+      ? 'bg-emerald-100 text-emerald-700 print:bg-transparent print:text-emerald-800'
+      : trend === 'neutral'
+        ? 'bg-amber-100 text-amber-700 print:bg-transparent print:text-amber-800'
+        : 'bg-rose-100 text-rose-700 print:bg-transparent print:text-rose-800';
+
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm flex flex-col h-full print:border-slate-300 print:shadow-none">
       <div className="flex items-center justify-between mb-4">
         <div className="p-2 bg-slate-50 rounded-lg print:bg-transparent print:p-0">{icon}</div>
-        {trend && (
-          <span className={`text-xs font-semibold px-2 py-1 rounded-full print:px-0 ${trend === 'positive' ? 'bg-emerald-100 text-emerald-700 print:bg-transparent print:text-emerald-800' : 'bg-rose-100 text-rose-700 print:bg-transparent print:text-rose-800'}`}>
-            {trend === 'positive' ? 'Healthy' : 'Needs Attention'}
+        {trend && trendLabel && (
+          <span className={`text-xs font-semibold px-2 py-1 rounded-full print:px-0 ${trendClass}`}>
+            {trendLabel}
           </span>
         )}
       </div>
       <h3 className="text-slate-500 font-semibold text-sm uppercase tracking-wider mb-1 print:text-slate-600">{title}</h3>
-      <div className="text-3xl font-bold text-slate-900 mb-2 print:text-2xl">{value}</div>
+      <div className="text-3xl font-bold text-slate-900 mb-1 print:text-2xl">{value}</div>
+      <div className="text-xs font-semibold text-emerald-700 mb-2 print:text-emerald-800">
+        Healthy benchmark: {healthyBenchmark}
+      </div>
       <p className="text-slate-500 text-sm mt-auto leading-relaxed print:text-slate-600">{description}</p>
     </div>
   );
