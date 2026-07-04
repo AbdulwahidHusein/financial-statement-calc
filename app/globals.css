@@ -36,3 +36,11 @@
   --color-amber-600: #d97706;
   --color-amber-900: #78350f;
 }
+
+.pdf-export-page {
+  width: 100%;
+  max-width: 56rem;
+  margin-left: auto;
+  margin-right: auto;
+  background: #ffffff;
+}

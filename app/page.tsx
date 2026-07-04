@@ -72,7 +72,8 @@ export default function FinancialApp() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const reportContainerRef = useRef<HTMLDivElement>(null);
+  const incomeReportRef = useRef<HTMLDivElement>(null);
+  const balanceReportRef = useRef<HTMLDivElement>(null);
 
   const displayData = useMemo(
     () => projectFinancialData(data, projectionYears),
@@ -120,7 +121,7 @@ export default function FinancialApp() {
   };
 
   const handleExportPdf = async () => {
-    if (!reportContainerRef.current || isExporting) return;
+    if (!incomeReportRef.current || !balanceReportRef.current || isExporting) return;
 
     setIsExporting(true);
     setIsExportingPdf(true);
@@ -128,9 +129,9 @@ export default function FinancialApp() {
     try {
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 
-      const { fileDate, currentDateLabel } = getExportDateParts();
+      const { fileDate } = getExportDateParts();
       await exportElementToPdf({
-        element: reportContainerRef.current,
+        pages: [incomeReportRef.current, balanceReportRef.current],
         companyName: data.companyName,
         currentDateLabel: displayDateLabel,
         fileDate,
@@ -374,26 +375,18 @@ export default function FinancialApp() {
 
             {/* Document Content */}
             <div
-              ref={reportContainerRef}
               id="report-container"
               className={`p-4 md:p-6 lg:p-8 bg-white document-container print:overflow-visible print:p-0 ${
                 isExportingPdf ? 'overflow-visible h-auto' : 'flex-1 overflow-auto'
               }`}
             >
-              {isExportingPdf && (
-                <div className="max-w-4xl mx-auto text-center mb-10 pb-6 border-b border-slate-300">
-                  <h1 className="text-2xl font-bold uppercase tracking-wide text-slate-900">
-                    {data.companyName || 'Financial Report'}
-                  </h1>
-                  <p className="text-sm font-medium text-slate-600 mt-2">
-                    {displayDateLabel}
-                    {projectionYears > 0 ? ' (Projected)' : ''}
-                  </p>
-                </div>
-              )}
-
-              <div className={activeTab === 'income' || isExportingPdf ? 'block print:block' : 'hidden print:block'}>
-                <div className="max-w-4xl mx-auto mb-16 print:mb-24">
+              <div
+                ref={incomeReportRef}
+                className={`${activeTab === 'income' || isExportingPdf ? 'block print:block' : 'hidden print:block'} ${
+                  isExportingPdf ? 'pdf-export-page' : ''
+                }`}
+              >
+                <div className={`max-w-4xl mx-auto ${isExportingPdf ? 'mb-0' : 'mb-16 print:mb-24'}`}>
                   <ReportStatementHeader
                     companyName={displayData.companyName}
                     title="Profit And Loss Statement"
@@ -439,8 +432,13 @@ export default function FinancialApp() {
                 </div>
               </div>
 
-              <div className={`${isExportingPdf ? 'break-before-page mt-16' : ''} print:break-before-page ${activeTab === 'balance' || isExportingPdf ? 'block print:block' : 'hidden print:block'}`}>
-                <div className="max-w-4xl mx-auto mb-16 print:mb-24">
+              <div
+                ref={balanceReportRef}
+                className={`print:break-before-page ${activeTab === 'balance' || isExportingPdf ? 'block print:block' : 'hidden print:block'} ${
+                  isExportingPdf ? 'pdf-export-page' : ''
+                }`}
+              >
+                <div className={`max-w-4xl mx-auto ${isExportingPdf ? 'mb-0' : 'mb-16 print:mb-24'}`}>
                   <ReportStatementHeader
                     companyName={displayData.companyName}
                     title="Balance Sheet"
@@ -509,7 +507,7 @@ export default function FinancialApp() {
                 </div>
               </div>
 
-              <div className={`${isExportingPdf ? 'break-before-page mt-16' : ''} print:break-before-page ${activeTab === 'ratios' || isExportingPdf ? 'block print:block' : 'hidden print:block'}`}>
+              <div className={`print:break-before-page ${activeTab === 'ratios' ? 'block print:block' : 'hidden print:block'}`}>
                 <div className="max-w-4xl mx-auto mb-16 print:mb-24">
                   <ReportStatementHeader
                     companyName={displayData.companyName}

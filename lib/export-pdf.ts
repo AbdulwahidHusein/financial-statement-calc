@@ -1,11 +1,18 @@
 type ExportPdfOptions = {
-  element: HTMLElement;
+  pages: HTMLElement[];
   companyName: string;
   currentDateLabel: string;
   fileDate: string;
 };
 
+type CapturedPage = {
+  imgData: string;
+  width: number;
+  height: number;
+};
+
 const UNSUPPORTED_COLOR_FUNCTIONS = ['oklch(', 'oklab(', 'lab(', 'lch(', 'color('];
+const PAGE_MARGIN_MM = 10;
 
 function sanitizeFilename(name: string): string {
   const cleaned = name
@@ -48,31 +55,8 @@ function prepareCloneForCapture(clonedDoc: Document, sourceElement: HTMLElement,
   copyComputedStyles(sourceElement, clonedElement);
 }
 
-export function getExportDateParts(now = new Date()) {
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-
-  return {
-    fileDate: `${year}-${month}-${day}`,
-    currentDateLabel: now.toLocaleDateString('en-US', {
-      month: 'long',
-      day: '2-digit',
-      year: 'numeric',
-    }),
-  };
-}
-
-export async function exportElementToPdf({
-  element,
-  companyName,
-  currentDateLabel,
-  fileDate,
-}: ExportPdfOptions): Promise<void> {
-  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-    import('html2canvas'),
-    import('jspdf'),
-  ]);
+async function capturePage(element: HTMLElement): Promise<CapturedPage> {
+  const { default: html2canvas } = await import('html2canvas');
 
   const canvas = await html2canvas(element, {
     scale: 2,
@@ -90,33 +74,74 @@ export async function exportElementToPdf({
     },
   });
 
-  const imgData = canvas.toDataURL('image/png');
-  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  return {
+    imgData: canvas.toDataURL('image/png'),
+    width: canvas.width,
+    height: canvas.height,
+  };
+}
+
+function addFullPageImage(pdf: InstanceType<typeof import('jspdf').jsPDF>, page: CapturedPage, pageIndex: number): void {
+  if (pageIndex > 0) {
+    pdf.addPage();
+  }
 
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
-  const imgWidth = pageWidth;
-  const imgHeight = (canvas.height * imgWidth) / canvas.width;
+  const maxWidth = pageWidth - PAGE_MARGIN_MM * 2;
+  const maxHeight = pageHeight - PAGE_MARGIN_MM * 2;
 
+  const aspectRatio = page.width / page.height;
+  let renderWidth = maxWidth;
+  let renderHeight = renderWidth / aspectRatio;
+
+  if (renderHeight > maxHeight) {
+    renderHeight = maxHeight;
+    renderWidth = renderHeight * aspectRatio;
+  }
+
+  const x = (pageWidth - renderWidth) / 2;
+  const y = (pageHeight - renderHeight) / 2;
+
+  pdf.addImage(page.imgData, 'PNG', x, y, renderWidth, renderHeight);
+}
+
+export function getExportDateParts(now = new Date()) {
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+
+  return {
+    fileDate: `${year}-${month}-${day}`,
+    currentDateLabel: now.toLocaleDateString('en-US', {
+      month: 'long',
+      day: '2-digit',
+      year: 'numeric',
+    }),
+  };
+}
+
+export async function exportElementToPdf({
+  pages,
+  companyName,
+  currentDateLabel,
+  fileDate,
+}: ExportPdfOptions): Promise<void> {
+  const { jsPDF } = await import('jspdf');
+  const capturedPages = await Promise.all(pages.map((page) => capturePage(page)));
+
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const title = companyName.trim() || 'Financial Report';
+
   pdf.setProperties({
     title: `${title} - ${currentDateLabel}`,
     subject: 'Financial Statements',
     creator: 'Financial Statement Generator',
   });
 
-  let heightLeft = imgHeight;
-  let position = 0;
-
-  pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-  heightLeft -= pageHeight;
-
-  while (heightLeft > 0) {
-    position = heightLeft - imgHeight;
-    pdf.addPage();
-    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-    heightLeft -= pageHeight;
-  }
+  capturedPages.forEach((page, index) => {
+    addFullPageImage(pdf, page, index);
+  });
 
   pdf.save(`${sanitizeFilename(title)}_${fileDate}.pdf`);
 }
