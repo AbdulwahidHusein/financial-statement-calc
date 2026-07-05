@@ -1,7 +1,7 @@
 'use client';
 
 import React, { startTransition, useEffect, useMemo, useRef, useState } from 'react';
-import { Calculator, DollarSign, FileText, Printer, Briefcase, Activity, PieChart, TrendingUp, LineChart, Menu, X, Download, AlertTriangle, Loader2, CalendarRange, ArrowRightLeft } from 'lucide-react';
+import { Calculator, DollarSign, FileText, Printer, Briefcase, Activity, PieChart, TrendingUp, LineChart, Menu, X, Download, AlertTriangle, Loader2, CalendarRange, ArrowRightLeft, RotateCcw } from 'lucide-react';
 import { exportElementToPdf, getExportDateParts } from '@/lib/export-pdf';
 import {
   type FinancialCalculations,
@@ -15,7 +15,7 @@ import {
   projectFinancialData,
   shiftStatementDate,
 } from '@/lib/finance';
-import { loadPersistedState, savePersistedState } from '@/lib/storage';
+import { clearPersistedState, loadPersistedState, savePersistedState } from '@/lib/storage';
 
 const formatCurrency = (amount: number) => {
   if (!Number.isFinite(amount)) return '-';
@@ -130,6 +130,17 @@ export default function FinancialApp() {
     window.print();
   };
 
+  const handleClearAll = () => {
+    const confirmed = window.confirm('Clear all entered data? This will reset every field.');
+    if (!confirmed) return;
+
+    clearPersistedState();
+    setData({ ...emptyFinancialData });
+    setProjectionYears(0);
+    setActiveTab('income');
+    setIsSidebarOpen(false);
+  };
+
   const handleExportPdf = async () => {
     if (!incomeReportRef.current || !balanceReportRef.current || isExporting) return;
 
@@ -175,6 +186,15 @@ export default function FinancialApp() {
           </div>
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button
+            type="button"
+            onClick={handleClearAll}
+            className="flex items-center gap-1 bg-rose-50 hover:bg-rose-100 text-rose-700 px-2 sm:px-2.5 md:px-3 py-1.5 rounded-md font-medium transition-colors text-xs md:text-sm border border-rose-200 flex-shrink-0"
+            title="Clear all inputs"
+          >
+            <RotateCcw size={16} className="flex-shrink-0" />
+            <span>Clear</span>
+          </button>
           <button
             onClick={handleExportPdf}
             disabled={isExporting}
