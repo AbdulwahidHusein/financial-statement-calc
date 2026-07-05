@@ -44,10 +44,7 @@ const getStatementYear = (dateStr: string) => {
 };
 
 export default function FinancialApp() {
-  const [data, setData] = useState<FinancialData>(() => ({
-    ...emptyFinancialData,
-    statementDate: getDefaultStatementDate(),
-  }));
+  const [data, setData] = useState<FinancialData>(emptyFinancialData);
   const [activeTab, setActiveTab] = useState<'income' | 'balance' | 'cashflow' | 'ratios'>('income');
   const [projectionYears, setProjectionYears] = useState(0);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -67,6 +64,11 @@ export default function FinancialApp() {
           statementDate: saved.data.statementDate || getDefaultStatementDate(),
         });
         setProjectionYears(saved.projectionYears);
+      } else {
+        setData({
+          ...emptyFinancialData,
+          statementDate: getDefaultStatementDate(),
+        });
       }
       setIsStorageReady(true);
     });
