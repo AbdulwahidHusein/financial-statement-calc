@@ -1,44 +1,21 @@
 'use client';
 
-import React, { useMemo, useRef, useState } from 'react';
-import { Calculator, DollarSign, FileText, Printer, Briefcase, Activity, PieChart, TrendingUp, LineChart, Menu, X, Download, AlertTriangle, Loader2, CalendarRange } from 'lucide-react';
+import React, { startTransition, useEffect, useMemo, useRef, useState } from 'react';
+import { Calculator, DollarSign, FileText, Printer, Briefcase, Activity, PieChart, TrendingUp, LineChart, Menu, X, Download, AlertTriangle, Loader2, CalendarRange, ArrowRightLeft } from 'lucide-react';
 import { exportElementToPdf, getExportDateParts } from '@/lib/export-pdf';
 import {
+  type FinancialCalculations,
   type FinancialData,
   MAX_PROJECTION_YEARS,
   calculateFinancials,
+  calculateCashFlow,
+  emptyFinancialData,
+  getPriorPeriodForCashFlow,
   getProjectionLabel,
   projectFinancialData,
   shiftStatementDate,
 } from '@/lib/finance';
-
-const initialData: FinancialData = {
-  companyName: '',
-  statementDate: '',
-  sales: 0,
-  beginningInventory: 0,
-  purchases: 0,
-  endingInventory: 0,
-  salaryAndBenefit: 0,
-  transportationCost: 0,
-  loadingAndUnloading: 0,
-  repairAndMaintenance: 0,
-  stationaryAndPrinting: 0,
-  miscellaneousExpense: 0,
-  profitTax: 0,
-  cashOnBank: 0,
-  otherReceivables: 0,
-  building: 0,
-  propertyAndEquipment: 0,
-  vehicle: 0,
-  accumulatedDepreciation: 0,
-  employeeBenefitPayable: 0,
-  creditPurchasePayable: 0,
-  outstandingFinancing: 0,
-  profitTaxPayable: 0,
-  beginningCapital: 0,
-  reservedCapital: 0,
-};
+import { loadPersistedState, savePersistedState } from '@/lib/storage';
 
 const formatCurrency = (amount: number) => {
   if (!Number.isFinite(amount)) return '-';
@@ -66,20 +43,53 @@ const getStatementYear = (dateStr: string) => {
 };
 
 export default function FinancialApp() {
-  const [data, setData] = useState<FinancialData>(initialData);
-  const [activeTab, setActiveTab] = useState<'income' | 'balance' | 'ratios'>('income');
+  const [data, setData] = useState<FinancialData>(emptyFinancialData);
+  const [activeTab, setActiveTab] = useState<'income' | 'balance' | 'cashflow' | 'ratios'>('income');
   const [projectionYears, setProjectionYears] = useState(0);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isStorageReady, setIsStorageReady] = useState(false);
   const incomeReportRef = useRef<HTMLDivElement>(null);
   const balanceReportRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const saved = loadPersistedState();
+    startTransition(() => {
+      if (saved) {
+        setData(saved.data);
+        setProjectionYears(saved.projectionYears);
+      }
+      setIsStorageReady(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isStorageReady) return;
+    savePersistedState(data, projectionYears);
+  }, [data, projectionYears, isStorageReady]);
 
   const displayData = useMemo(
     () => projectFinancialData(data, projectionYears),
     [data, projectionYears]
   );
   const calc = useMemo(() => calculateFinancials(displayData), [displayData]);
+  const previousCalc = useMemo(() => {
+    if (projectionYears <= 0) return null;
+    return calculateFinancials(projectFinancialData(data, projectionYears - 1));
+  }, [data, projectionYears]);
+  const previousPeriodLabel =
+    data.statementDate && projectionYears > 0
+      ? formatStatementDate(shiftStatementDate(data.statementDate, projectionYears - 1))
+      : null;
+  const priorPeriodData = useMemo(
+    () => getPriorPeriodForCashFlow(data, projectionYears),
+    [data, projectionYears]
+  );
+  const cashFlow = useMemo(
+    () => calculateCashFlow(displayData, priorPeriodData, projectionYears === 0),
+    [displayData, priorPeriodData, projectionYears]
+  );
   const displayDateLabel = displayData.statementDate
     ? formatStatementDate(displayData.statementDate)
     : 'DATE';
@@ -280,6 +290,7 @@ export default function FinancialApp() {
 
               <div className="pt-2 border-t border-slate-100">
                 <InputField label="Profit Tax" name="profitTax" value={data.profitTax} onChange={handleNumberChange} />
+                <p className="text-xs text-slate-400 mt-2">Also used as profit tax payable on the balance sheet.</p>
               </div>
             </div>
           </div>
@@ -316,7 +327,6 @@ export default function FinancialApp() {
                   <InputField label="Employee Benefit / Salary" name="employeeBenefitPayable" value={data.employeeBenefitPayable} onChange={handleNumberChange} />
                   <InputField label="Credit Purchase Payable" name="creditPurchasePayable" value={data.creditPurchasePayable} onChange={handleNumberChange} />
                   <InputField label="Outstanding Financing" name="outstandingFinancing" value={data.outstandingFinancing} onChange={handleNumberChange} />
-                  <InputField label="Profit Tax Payable" name="profitTaxPayable" value={data.profitTaxPayable} onChange={handleNumberChange} />
                 </div>
               </div>
 
@@ -468,7 +478,7 @@ export default function FinancialApp() {
                     <ReportRow label="EMPLOYEE BENEFIT/SALARY" value={displayData.employeeBenefitPayable} />
                     <ReportRow label="CREDIT PURCHASE PAYABLE" value={displayData.creditPurchasePayable} />
                     <ReportRow label="OUTSTANDING FINANCING" value={displayData.outstandingFinancing} />
-                    <ReportRow label="PROFIT TAX PAYABLE" value={displayData.profitTaxPayable} />
+                    <ReportRow label="PROFIT TAX PAYABLE" value={displayData.profitTax} />
                     <ReportRow label="BANK WORKING CAPITAL LOAN" value={calc.bankWorkingCapitalFinancing} />
 
                     <ReportRow label="TOTAL LIABILITY" value={calc.totalLiability} isBold isSubtotal />
@@ -488,6 +498,100 @@ export default function FinancialApp() {
                 </div>
               </div>
 
+              <div className={`print:break-before-page ${activeTab === 'cashflow' ? 'block print:block' : 'hidden print:hidden'}`}>
+                <div className="max-w-4xl mx-auto mb-4 md:mb-6 print:mb-24">
+                  <ReportStatementHeader
+                    companyName={displayData.companyName}
+                    title="Statement of Cash Flows"
+                    displayDateLabel={displayDateLabel}
+                    projectionYears={projectionYears}
+                    forExport={false}
+                  />
+
+                  {cashFlow.usesAssumedOpeningBalances ? (
+                    <p className="text-xs text-slate-500 mb-4 leading-relaxed print:text-slate-600">
+                      Opening balances assumed at zero for cash, receivables, and payables. Inventory opening comes from
+                      P&amp;L beginning inventory. For projected periods, all changes link to the prior balance sheet.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-slate-500 mb-4 leading-relaxed print:text-slate-600">
+                      Linked to P&amp;L and balance sheet vs prior period
+                      {previousPeriodLabel ? ` (${previousPeriodLabel})` : ''}.
+                    </p>
+                  )}
+
+                  <div className="w-full border border-slate-800 border-collapse">
+                    <div className="grid grid-cols-12 border-b border-slate-800 bg-slate-50">
+                      <div className="col-span-8 p-2 font-bold text-sm border-r border-slate-800">Description</div>
+                      <div className="col-span-4 p-2 font-bold text-sm text-right">Amounts in (Birr)</div>
+                    </div>
+
+                    <div className="grid grid-cols-12 border-b border-slate-800 bg-slate-100">
+                      <div className="col-span-12 p-2 font-bold text-sm">Cash flows</div>
+                    </div>
+
+                    <ReportRow label="Net income" value={cashFlow.netIncome} />
+                    <ReportRow label="Add: Depreciation (non-cash)" value={cashFlow.depreciation} indent />
+                    <ReportRow label="Change in inventory" value={cashFlow.inventoryChange} indent />
+                    <ReportRow label="Change in other receivables" value={cashFlow.receivablesChange} indent />
+                    <ReportRow label="Change in operating payables" value={cashFlow.payablesChange} indent />
+                    <ReportRow
+                      label="Net cash from operating activities"
+                      value={cashFlow.netCashFromOperating}
+                      isBold
+                      isSubtotal
+                    />
+
+                    <div className="grid grid-cols-12 border-b border-slate-800 bg-slate-100">
+                      <div className="col-span-12 p-2 font-bold text-sm">Cash flows from investing activities</div>
+                    </div>
+
+                    <ReportRow label="Purchase / sale of fixed assets" value={cashFlow.fixedAssetPurchases} indent />
+                    <ReportRow
+                      label="Net cash from investing activities"
+                      value={cashFlow.netCashFromInvesting}
+                      isBold
+                      isSubtotal
+                    />
+
+                    <div className="grid grid-cols-12 border-b border-slate-800 bg-slate-100">
+                      <div className="col-span-12 p-2 font-bold text-sm">Cash flows from financing activities</div>
+                    </div>
+
+                    <ReportRow label="Change in bank working capital loan" value={cashFlow.bankLoanChange} indent />
+                    <ReportRow label="Change in outstanding financing" value={cashFlow.outstandingFinancingChange} indent />
+                    <ReportRow label="Reserved capital contributed" value={cashFlow.reservedCapitalChange} indent />
+                    <ReportRow label="Change in beginning capital" value={cashFlow.ownerCapitalChange} indent />
+                    <ReportRow
+                      label="Net cash from financing activities"
+                      value={cashFlow.netCashFromFinancing}
+                      isBold
+                      isSubtotal
+                    />
+
+                    <div className="grid grid-cols-12 border-b border-slate-800 bg-slate-100">
+                      <div className="col-span-12 p-2 font-bold text-sm">Net change in cash</div>
+                    </div>
+
+                    <ReportRow label="Net increase (decrease) in cash" value={cashFlow.netChangeInCash} isBold isSubtotal />
+                    <ReportRow label="Cash at beginning of period" value={cashFlow.beginningCash} />
+                    <ReportRow label="Cash at end of period" value={cashFlow.endingCash} isBold isTotal />
+
+                    <div
+                      className={`grid grid-cols-12 border-t border-slate-800 px-2 py-2 text-xs font-medium ${
+                        cashFlow.reconciles ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'
+                      }`}
+                    >
+                      <div className="col-span-12">
+                        {cashFlow.reconciles
+                          ? '✓ Cash flow reconciles: beginning cash + net change = ending cash on balance sheet.'
+                          : `Note: Calculated ending cash (${formatBirr(cashFlow.beginningCash + cashFlow.netChangeInCash)}) differs from balance sheet cash (${formatBirr(cashFlow.endingCash)}) by ${formatBirr(Math.abs(cashFlow.beginningCash + cashFlow.netChangeInCash - cashFlow.endingCash))}. Check opening balances or balance sheet entries.`}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div className={`print:break-before-page ${activeTab === 'ratios' ? 'block print:block' : 'hidden print:block'}`}>
                 <div className="max-w-4xl mx-auto mb-4 md:mb-6 print:mb-24">
                   <ReportStatementHeader
@@ -497,6 +601,14 @@ export default function FinancialApp() {
                     projectionYears={projectionYears}
                     forExport={false}
                   />
+
+                  {previousCalc && previousPeriodLabel && (
+                    <RatioYearComparison
+                      calc={calc}
+                      previousCalc={previousCalc}
+                      previousPeriodLabel={previousPeriodLabel}
+                    />
+                  )}
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 print:grid-cols-2">
                     <div className="col-span-1 md:col-span-2">
@@ -595,6 +707,132 @@ export default function FinancialApp() {
   );
 }
 
+function formatRatioChange(diff: number, unit: 'x' | 'percent' | 'currency') {
+  if (!Number.isFinite(diff) || Math.abs(diff) < 0.005) {
+    return { text: 'No change', className: 'text-slate-500' };
+  }
+
+  const sign = diff > 0 ? '+' : '−';
+  const absolute = Math.abs(diff);
+
+  if (unit === 'x') {
+    return {
+      text: `${sign}${absolute.toFixed(2)}x`,
+      className: diff > 0 ? 'text-emerald-700' : 'text-rose-700',
+    };
+  }
+  if (unit === 'percent') {
+    return {
+      text: `${sign}${absolute.toFixed(1)}%`,
+      className: diff > 0 ? 'text-emerald-700' : 'text-rose-700',
+    };
+  }
+  return {
+    text: `${sign}${formatCurrency(absolute)}`,
+    className: diff > 0 ? 'text-emerald-700' : 'text-rose-700',
+  };
+}
+
+function RatioYearComparison({
+  calc,
+  previousCalc,
+  previousPeriodLabel,
+}: {
+  calc: FinancialCalculations;
+  previousCalc: FinancialCalculations;
+  previousPeriodLabel: string;
+}) {
+  const rows = [
+    {
+      label: 'Current Ratio',
+      previous: previousCalc.currentRatio !== null ? `${previousCalc.currentRatio.toFixed(2)}x` : 'N/A',
+      current: calc.currentRatio !== null ? `${calc.currentRatio.toFixed(2)}x` : 'N/A',
+      diff: (calc.currentRatio ?? 0) - (previousCalc.currentRatio ?? 0),
+      unit: 'x' as const,
+    },
+    {
+      label: 'Debt to Equity',
+      previous: `${previousCalc.debtToEquity.toFixed(2)}x`,
+      current: `${calc.debtToEquity.toFixed(2)}x`,
+      diff: calc.debtToEquity - previousCalc.debtToEquity,
+      unit: 'x' as const,
+    },
+    {
+      label: 'Gross Profit Margin',
+      previous: `${previousCalc.grossProfitMargin.toFixed(1)}%`,
+      current: `${calc.grossProfitMargin.toFixed(1)}%`,
+      diff: calc.grossProfitMargin - previousCalc.grossProfitMargin,
+      unit: 'percent' as const,
+    },
+    {
+      label: 'Net Profit Margin',
+      previous: `${previousCalc.netProfitMargin.toFixed(1)}%`,
+      current: `${calc.netProfitMargin.toFixed(1)}%`,
+      diff: calc.netProfitMargin - previousCalc.netProfitMargin,
+      unit: 'percent' as const,
+    },
+    {
+      label: 'Return on Assets',
+      previous: `${previousCalc.returnOnAssets.toFixed(1)}%`,
+      current: `${calc.returnOnAssets.toFixed(1)}%`,
+      diff: calc.returnOnAssets - previousCalc.returnOnAssets,
+      unit: 'percent' as const,
+    },
+    {
+      label: 'Return on Equity',
+      previous: `${previousCalc.returnOnEquity.toFixed(1)}%`,
+      current: `${calc.returnOnEquity.toFixed(1)}%`,
+      diff: calc.returnOnEquity - previousCalc.returnOnEquity,
+      unit: 'percent' as const,
+    },
+    {
+      label: 'Net Working Capital',
+      previous: formatCurrency(previousCalc.netWorkingCapital),
+      current: formatCurrency(calc.netWorkingCapital),
+      diff: calc.netWorkingCapital - previousCalc.netWorkingCapital,
+      unit: 'currency' as const,
+    },
+  ];
+
+  return (
+    <div className="mb-6 rounded-xl border border-indigo-200 bg-indigo-50/40 overflow-hidden print:border-slate-300 print:bg-white">
+      <div className="px-4 py-3 border-b border-indigo-200/80 bg-white/70 print:bg-slate-50">
+        <h3 className="text-sm font-bold text-slate-900">Year-over-year change</h3>
+        <p className="text-xs text-slate-600 mt-0.5">
+          This period vs <span className="font-medium text-slate-800">{previousPeriodLabel}</span>
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[520px] text-sm">
+          <thead>
+            <tr className="text-left border-b border-indigo-100 bg-white/60">
+              <th className="px-4 py-2 font-semibold text-slate-600">Ratio</th>
+              <th className="px-3 py-2 font-semibold text-slate-600 text-right">Last year</th>
+              <th className="px-3 py-2 font-semibold text-indigo-800 text-right">This year</th>
+              <th className="px-4 py-2 font-semibold text-slate-600 text-right">Change</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const change = formatRatioChange(row.diff, row.unit);
+              return (
+                <tr key={row.label} className="border-b border-indigo-50 last:border-0 bg-white/50">
+                  <td className="px-4 py-2.5 font-medium text-slate-800">{row.label}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">{row.previous}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-indigo-900">{row.current}</td>
+                  <td className={`px-4 py-2.5 text-right tabular-nums font-semibold ${change.className}`}>
+                    {change.text}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function StatementPeriodSelector({
   statementDate,
   projectionYears,
@@ -650,8 +888,8 @@ function ReportToolbar({
   displayDateLabel,
   onProjectionChange,
 }: {
-  activeTab: 'income' | 'balance' | 'ratios';
-  onTabChange: (tab: 'income' | 'balance' | 'ratios') => void;
+  activeTab: 'income' | 'balance' | 'cashflow' | 'ratios';
+  onTabChange: (tab: 'income' | 'balance' | 'cashflow' | 'ratios') => void;
   statementDate: string;
   projectionYears: number;
   displayDateLabel: string;
@@ -660,6 +898,7 @@ function ReportToolbar({
   const tabs = [
     { id: 'income' as const, label: 'P&L', fullLabel: 'Profit & Loss', icon: FileText },
     { id: 'balance' as const, label: 'Balance', fullLabel: 'Balance Sheet', icon: Briefcase },
+    { id: 'cashflow' as const, label: 'Cash', fullLabel: 'Cash Flow', icon: ArrowRightLeft },
     { id: 'ratios' as const, label: 'Ratios', fullLabel: 'Financial Ratios', icon: Activity },
   ];
 

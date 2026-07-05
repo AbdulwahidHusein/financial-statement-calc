@@ -21,9 +21,35 @@ export type FinancialData = {
   employeeBenefitPayable: number;
   creditPurchasePayable: number;
   outstandingFinancing: number;
-  profitTaxPayable: number;
   beginningCapital: number;
   reservedCapital: number;
+};
+
+export const emptyFinancialData: FinancialData = {
+  companyName: '',
+  statementDate: '',
+  sales: 0,
+  beginningInventory: 0,
+  purchases: 0,
+  endingInventory: 0,
+  salaryAndBenefit: 0,
+  transportationCost: 0,
+  loadingAndUnloading: 0,
+  repairAndMaintenance: 0,
+  stationaryAndPrinting: 0,
+  miscellaneousExpense: 0,
+  profitTax: 0,
+  cashOnBank: 0,
+  otherReceivables: 0,
+  building: 0,
+  propertyAndEquipment: 0,
+  vehicle: 0,
+  accumulatedDepreciation: 0,
+  employeeBenefitPayable: 0,
+  creditPurchasePayable: 0,
+  outstandingFinancing: 0,
+  beginningCapital: 0,
+  reservedCapital: 0,
 };
 
 export type FinancialCalculations = {
@@ -54,6 +80,114 @@ export type FinancialCalculations = {
   returnOnEquity: number;
 };
 
+export type CashFlowStatement = {
+  netIncome: number;
+  depreciation: number;
+  inventoryChange: number;
+  receivablesChange: number;
+  payablesChange: number;
+  netCashFromOperating: number;
+  fixedAssetPurchases: number;
+  netCashFromInvesting: number;
+  bankLoanChange: number;
+  outstandingFinancingChange: number;
+  reservedCapitalChange: number;
+  ownerCapitalChange: number;
+  netCashFromFinancing: number;
+  netChangeInCash: number;
+  beginningCash: number;
+  endingCash: number;
+  reconciles: boolean;
+  usesAssumedOpeningBalances: boolean;
+};
+
+function grossFixedAssets(data: FinancialData) {
+  return data.building + data.propertyAndEquipment + data.vehicle;
+}
+
+function operatingPayables(data: FinancialData) {
+  return data.employeeBenefitPayable + data.creditPurchasePayable + data.profitTax;
+}
+
+/** Opening snapshot for the current period, or the prior projected period. */
+export function getPriorPeriodForCashFlow(base: FinancialData, projectionYears: number): FinancialData {
+  if (projectionYears > 0) {
+    return projectFinancialData(base, projectionYears - 1);
+  }
+
+  return {
+    ...base,
+    endingInventory: base.beginningInventory,
+    cashOnBank: 0,
+    otherReceivables: 0,
+    employeeBenefitPayable: 0,
+    creditPurchasePayable: 0,
+    outstandingFinancing: 0,
+    profitTax: 0,
+    accumulatedDepreciation: 0,
+    reservedCapital: 0,
+  };
+}
+
+export function calculateCashFlow(current: FinancialData, prior: FinancialData, usesAssumedOpeningBalances: boolean): CashFlowStatement {
+  const calc = calculateFinancials(current);
+  const priorCalc = calculateFinancials(prior);
+
+  const currentGrossFA = grossFixedAssets(current);
+  const priorGrossFA = grossFixedAssets(prior);
+
+  const depreciationFromAccChange = current.accumulatedDepreciation - prior.accumulatedDepreciation;
+  const depreciation =
+    depreciationFromAccChange > 0.005
+      ? depreciationFromAccChange
+      : currentGrossFA > 0
+        ? Math.min(currentGrossFA * 0.1, current.accumulatedDepreciation)
+        : 0;
+
+  const inventoryChange = prior.endingInventory - current.endingInventory;
+  const receivablesChange = prior.otherReceivables - current.otherReceivables;
+  const payablesChange = operatingPayables(current) - operatingPayables(prior);
+
+  const netCashFromOperating =
+    calc.netIncome + depreciation + inventoryChange + receivablesChange + payablesChange;
+
+  const fixedAssetPurchases = priorGrossFA - currentGrossFA;
+  const netCashFromInvesting = fixedAssetPurchases;
+
+  const bankLoanChange = calc.bankWorkingCapitalFinancing - priorCalc.bankWorkingCapitalFinancing;
+  const outstandingFinancingChange = current.outstandingFinancing - prior.outstandingFinancing;
+  const reservedCapitalChange = current.reservedCapital - prior.reservedCapital;
+  const ownerCapitalChange = current.beginningCapital - prior.beginningCapital;
+
+  const netCashFromFinancing =
+    bankLoanChange + outstandingFinancingChange + reservedCapitalChange + ownerCapitalChange;
+
+  const netChangeInCash = netCashFromOperating + netCashFromInvesting + netCashFromFinancing;
+  const beginningCash = prior.cashOnBank;
+  const endingCash = current.cashOnBank;
+
+  return {
+    netIncome: calc.netIncome,
+    depreciation,
+    inventoryChange,
+    receivablesChange,
+    payablesChange,
+    netCashFromOperating,
+    fixedAssetPurchases,
+    netCashFromInvesting,
+    bankLoanChange,
+    outstandingFinancingChange,
+    reservedCapitalChange,
+    ownerCapitalChange,
+    netCashFromFinancing,
+    netChangeInCash,
+    beginningCash,
+    endingCash,
+    reconciles: Math.abs(beginningCash + netChangeInCash - endingCash) < 0.005,
+    usesAssumedOpeningBalances,
+  };
+}
+
 export const MAX_PROJECTION_YEARS = 5;
 
 export function calculateFinancials(data: FinancialData): FinancialCalculations {
@@ -81,7 +215,7 @@ export function calculateFinancials(data: FinancialData): FinancialCalculations 
     data.employeeBenefitPayable +
     data.creditPurchasePayable +
     data.outstandingFinancing +
-    data.profitTaxPayable;
+    data.profitTax;
 
   const totalCapital = data.beginningCapital + netIncome + data.reservedCapital;
 
@@ -153,7 +287,6 @@ export function rollForwardOneYear(data: FinancialData): FinancialData {
     beginningCapital: totalCapital,
     reservedCapital: 0,
     cashOnBank: data.cashOnBank + netIncome,
-    profitTaxPayable: data.profitTax,
     accumulatedDepreciation: Math.min(
       data.accumulatedDepreciation + annualDepreciation,
       grossFixedAssets
