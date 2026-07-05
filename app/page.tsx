@@ -10,6 +10,7 @@ import {
   calculateFinancials,
   calculateCashFlow,
   emptyFinancialData,
+  getDefaultStatementDate,
   getPriorPeriodForCashFlow,
   getProjectionLabel,
   projectFinancialData,
@@ -43,7 +44,10 @@ const getStatementYear = (dateStr: string) => {
 };
 
 export default function FinancialApp() {
-  const [data, setData] = useState<FinancialData>(emptyFinancialData);
+  const [data, setData] = useState<FinancialData>(() => ({
+    ...emptyFinancialData,
+    statementDate: getDefaultStatementDate(),
+  }));
   const [activeTab, setActiveTab] = useState<'income' | 'balance' | 'cashflow' | 'ratios'>('income');
   const [projectionYears, setProjectionYears] = useState(0);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -52,12 +56,16 @@ export default function FinancialApp() {
   const [isStorageReady, setIsStorageReady] = useState(false);
   const incomeReportRef = useRef<HTMLDivElement>(null);
   const balanceReportRef = useRef<HTMLDivElement>(null);
+  const cashFlowReportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const saved = loadPersistedState();
     startTransition(() => {
       if (saved) {
-        setData(saved.data);
+        setData({
+          ...saved.data,
+          statementDate: saved.data.statementDate || getDefaultStatementDate(),
+        });
         setProjectionYears(saved.projectionYears);
       }
       setIsStorageReady(true);
@@ -135,14 +143,14 @@ export default function FinancialApp() {
     if (!confirmed) return;
 
     clearPersistedState();
-    setData({ ...emptyFinancialData });
+    setData({ ...emptyFinancialData, statementDate: getDefaultStatementDate() });
     setProjectionYears(0);
     setActiveTab('income');
     setIsSidebarOpen(false);
   };
 
   const handleExportPdf = async () => {
-    if (!incomeReportRef.current || !balanceReportRef.current || isExporting) return;
+    if (!incomeReportRef.current || !balanceReportRef.current || !cashFlowReportRef.current || isExporting) return;
 
     setIsExporting(true);
     setIsExportingPdf(true);
@@ -152,7 +160,7 @@ export default function FinancialApp() {
 
       const { fileDate } = getExportDateParts();
       await exportElementToPdf({
-        pages: [incomeReportRef.current, balanceReportRef.current],
+        pages: [incomeReportRef.current, balanceReportRef.current, cashFlowReportRef.current],
         companyName: data.companyName,
         currentDateLabel: displayDateLabel,
         fileDate,
@@ -518,22 +526,28 @@ export default function FinancialApp() {
                 </div>
               </div>
 
-              <div className={`print:break-before-page ${activeTab === 'cashflow' ? 'block print:block' : 'hidden print:hidden'}`}>
-                <div className="max-w-4xl mx-auto mb-4 md:mb-6 print:mb-24">
+              <div
+                ref={cashFlowReportRef}
+                className={`print:break-before-page ${activeTab === 'cashflow' || isExportingPdf ? 'block print:block' : 'hidden print:hidden'} ${
+                  isExportingPdf ? 'pdf-export-page' : ''
+                }`}
+              >
+                <div className={`max-w-4xl mx-auto ${isExportingPdf ? 'mb-0' : 'mb-4 md:mb-6 print:mb-24'}`}>
                   <ReportStatementHeader
                     companyName={displayData.companyName}
                     title="Statement of Cash Flows"
                     displayDateLabel={displayDateLabel}
                     projectionYears={projectionYears}
-                    forExport={false}
+                    forExport={isExportingPdf}
                   />
 
-                  {cashFlow.usesAssumedOpeningBalances ? (
+                  {!isExportingPdf && cashFlow.usesAssumedOpeningBalances && (
                     <p className="text-xs text-slate-500 mb-4 leading-relaxed print:text-slate-600">
                       Opening balances assumed at zero for cash, receivables, and payables. Inventory opening comes from
                       P&amp;L beginning inventory. For projected periods, all changes link to the prior balance sheet.
                     </p>
-                  ) : (
+                  )}
+                  {!isExportingPdf && !cashFlow.usesAssumedOpeningBalances && (
                     <p className="text-xs text-slate-500 mb-4 leading-relaxed print:text-slate-600">
                       Linked to P&amp;L and balance sheet vs prior period
                       {previousPeriodLabel ? ` (${previousPeriodLabel})` : ''}.
@@ -597,17 +611,19 @@ export default function FinancialApp() {
                     <ReportRow label="Cash at beginning of period" value={cashFlow.beginningCash} />
                     <ReportRow label="Cash at end of period" value={cashFlow.endingCash} isBold isTotal />
 
-                    <div
-                      className={`grid grid-cols-12 border-t border-slate-800 px-2 py-2 text-xs font-medium ${
-                        cashFlow.reconciles ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'
-                      }`}
-                    >
-                      <div className="col-span-12">
-                        {cashFlow.reconciles
-                          ? '✓ Cash flow reconciles: beginning cash + net change = ending cash on balance sheet.'
-                          : `Note: Calculated ending cash (${formatBirr(cashFlow.beginningCash + cashFlow.netChangeInCash)}) differs from balance sheet cash (${formatBirr(cashFlow.endingCash)}) by ${formatBirr(Math.abs(cashFlow.beginningCash + cashFlow.netChangeInCash - cashFlow.endingCash))}. Check opening balances or balance sheet entries.`}
+                    {!isExportingPdf && (
+                      <div
+                        className={`grid grid-cols-12 border-t border-slate-800 px-2 py-2 text-xs font-medium ${
+                          cashFlow.reconciles ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'
+                        }`}
+                      >
+                        <div className="col-span-12">
+                          {cashFlow.reconciles
+                            ? '✓ Cash flow reconciles: beginning cash + net change = ending cash on balance sheet.'
+                            : `Note: Calculated ending cash (${formatBirr(cashFlow.beginningCash + cashFlow.netChangeInCash)}) differs from balance sheet cash (${formatBirr(cashFlow.endingCash)}) by ${formatBirr(Math.abs(cashFlow.beginningCash + cashFlow.netChangeInCash - cashFlow.endingCash))}. Check opening balances or balance sheet entries.`}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </div>
               </div>
