@@ -129,10 +129,10 @@ export default function FinancialApp() {
   if (calc.netFixedAssets < 0) {
     warnings.push('Net fixed assets is negative — accumulated depreciation exceeds fixed asset values.');
   }
-  const balanceSheetDifference = calc.totalAssets - calc.totalLiabilityAndEquity;
+  const balanceSheetDifference = calc.totalAssets - (calc.operatingCurrentLiabilities + calc.totalCapital);
   if (Math.abs(balanceSheetDifference) > 0.005) {
     warnings.push(
-      `Balance sheet is out of balance by ${formatBirr(Math.abs(balanceSheetDifference))}. Total assets (${formatBirr(calc.totalAssets)}) does not equal total liabilities and equity (${formatBirr(calc.totalLiabilityAndEquity)}).`
+      `Balance sheet is out of balance by ${formatBirr(Math.abs(balanceSheetDifference))}. Total assets (${formatBirr(calc.totalAssets)}) does not equal total liabilities and equity (${formatBirr(calc.operatingCurrentLiabilities + calc.totalCapital)}).`
     );
   }
 
@@ -366,7 +366,6 @@ export default function FinancialApp() {
                   <InputField label="Beginning Capital" name="beginningCapital" value={data.beginningCapital} onChange={handleNumberChange} />
                   <InputField label="Reserved Capital" name="reservedCapital" value={data.reservedCapital} onChange={handleNumberChange} />
                 </div>
-                <p className="text-xs text-slate-400 mt-2">Bank working capital loan is calculated on the balance sheet.</p>
               </div>
             </div>
           </div>
@@ -509,9 +508,8 @@ export default function FinancialApp() {
                     <ReportRow label="CREDIT PURCHASE PAYABLE" value={displayData.creditPurchasePayable} />
                     <ReportRow label="OUTSTANDING FINANCING" value={displayData.outstandingFinancing} />
                     <ReportRow label="PROFIT TAX PAYABLE" value={displayData.profitTax} />
-                    <ReportRow label="BANK WORKING CAPITAL LOAN" value={calc.bankWorkingCapitalFinancing} />
 
-                    <ReportRow label="TOTAL LIABILITY" value={calc.totalLiability} isBold isSubtotal />
+                    <ReportRow label="TOTAL LIABILITY" value={calc.operatingCurrentLiabilities} isBold isSubtotal />
 
                     <div className="grid grid-cols-12 border-b border-slate-800">
                       <div className="col-span-12 p-2 font-bold text-sm">EQUITY</div>
@@ -523,7 +521,12 @@ export default function FinancialApp() {
 
                     <ReportRow label="TOTAL CAPITAL" value={calc.totalCapital} isBold isSubtotal />
 
-                    <ReportRow label="TOTAL LIABILITY AND EQUITY" value={calc.totalLiabilityAndEquity} isBold isTotal />
+                    <ReportRow
+                      label="TOTAL LIABILITY AND EQUITY"
+                      value={calc.operatingCurrentLiabilities + calc.totalCapital}
+                      isBold
+                      isTotal
+                    />
                   </div>
                 </div>
               </div>
