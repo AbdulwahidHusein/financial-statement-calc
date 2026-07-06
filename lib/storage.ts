@@ -36,6 +36,7 @@ const NUMBER_FIELD_KEYS = [
   'outstandingFinancing',
   'beginningCapital',
   'reservedCapital',
+  'additionalCapital',
 ] as const satisfies ReadonlyArray<keyof FinancialData>;
 
 function sanitizeNumber(value: unknown): number {

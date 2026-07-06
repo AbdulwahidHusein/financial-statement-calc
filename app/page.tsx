@@ -364,6 +364,7 @@ export default function FinancialApp() {
                 <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Equity</h3>
                 <div className="space-y-3">
                   <InputField label="Beginning Capital" name="beginningCapital" value={data.beginningCapital} onChange={handleNumberChange} />
+                  <InputField label="Additional Capital" name="additionalCapital" value={data.additionalCapital} onChange={handleNumberChange} />
                   <InputField label="Reserved Capital" name="reservedCapital" value={data.reservedCapital} onChange={handleNumberChange} />
                 </div>
               </div>
@@ -516,6 +517,7 @@ export default function FinancialApp() {
                     </div>
 
                     <ReportRow label="BEG. CAPITAL" value={displayData.beginningCapital} />
+                    <ReportRow label="ADDITIONAL CAPITAL" value={displayData.additionalCapital} />
                     <ReportRow label="NET PROFIT" value={calc.netIncome} />
                     <ReportRow label="RESERVED CAPITAL" value={displayData.reservedCapital} />
 

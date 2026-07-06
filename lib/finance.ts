@@ -23,6 +23,7 @@ export type FinancialData = {
   outstandingFinancing: number;
   beginningCapital: number;
   reservedCapital: number;
+  additionalCapital: number;
 };
 
 export function getDefaultStatementDate(date = new Date()): string {
@@ -57,6 +58,7 @@ export const emptyFinancialData: FinancialData = {
   outstandingFinancing: 0,
   beginningCapital: 0,
   reservedCapital: 0,
+  additionalCapital: 0,
 };
 
 export type FinancialCalculations = {
@@ -133,6 +135,7 @@ export function getPriorPeriodForCashFlow(base: FinancialData, projectionYears: 
     profitTax: 0,
     accumulatedDepreciation: 0,
     reservedCapital: 0,
+    additionalCapital: 0,
   };
 }
 
@@ -224,7 +227,7 @@ export function calculateFinancials(data: FinancialData): FinancialCalculations 
     data.outstandingFinancing +
     data.profitTax;
 
-  const totalCapital = data.beginningCapital + netIncome + data.reservedCapital;
+  const totalCapital = data.beginningCapital + netIncome + data.reservedCapital + data.additionalCapital;
 
   // Bank WC loan is a balancing output: liability needed so assets = liabilities + equity.
   const bankWorkingCapitalFinancing = Math.max(
@@ -293,6 +296,7 @@ export function rollForwardOneYear(data: FinancialData): FinancialData {
     beginningInventory: data.endingInventory,
     beginningCapital: totalCapital,
     reservedCapital: 0,
+    additionalCapital: 0,
     cashOnBank: data.cashOnBank + netIncome,
     accumulatedDepreciation: Math.min(
       data.accumulatedDepreciation + annualDepreciation,
