@@ -119,9 +119,15 @@ function operatingPayables(data: FinancialData) {
 }
 
 /** Opening snapshot for the current period, or the prior projected period. */
-export function getPriorPeriodForCashFlow(base: FinancialData, projectionYears: number): FinancialData {
-  if (projectionYears > 0) {
-    return projectFinancialData(base, projectionYears - 1);
+export function getPriorPeriodForCashFlow(
+  base: FinancialData,
+  projectionYears: number,
+  projectionMonths = 0
+): FinancialData {
+  const totalMonths = getTotalProjectionMonths(projectionYears, projectionMonths);
+  if (totalMonths > 0) {
+    const priorMonths = totalMonths - 1;
+    return projectFinancialData(base, Math.floor(priorMonths / 12), priorMonths % 12);
   }
 
   return {
@@ -199,6 +205,45 @@ export function calculateCashFlow(current: FinancialData, prior: FinancialData, 
 }
 
 export const MAX_PROJECTION_YEARS = 5;
+export const MAX_PROJECTION_MONTHS = 12;
+
+export type ProjectionPeriod = {
+  years: number;
+  months: number;
+};
+
+export function normalizeProjectionPeriod(years: number, months: number): ProjectionPeriod {
+  const safeYears = Math.min(Math.max(Math.trunc(years), 0), MAX_PROJECTION_YEARS);
+  const safeMonths = Math.min(Math.max(Math.trunc(months), 0), MAX_PROJECTION_MONTHS);
+  return { years: safeYears, months: safeMonths };
+}
+
+export function getTotalProjectionMonths(years: number, months: number): number {
+  const { years: y, months: m } = normalizeProjectionPeriod(years, months);
+  return y * 12 + m;
+}
+
+export function isProjectedPeriod(years: number, months: number): boolean {
+  return getTotalProjectionMonths(years, months) > 0;
+}
+
+export function formatDateParts(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+export function shiftStatementDateByMonths(dateStr: string, months: number): string {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  if (!year || !month || !day) return dateStr;
+
+  const date = new Date(year, month - 1, day);
+  date.setMonth(date.getMonth() + months);
+
+  return formatDateParts(date.getFullYear(), date.getMonth() + 1, date.getDate());
+}
+
+export function getProjectedStatementDate(dateStr: string, years: number, months: number): string {
+  return shiftStatementDateByMonths(dateStr, getTotalProjectionMonths(years, months));
+}
 
 export function calculateFinancials(data: FinancialData): FinancialCalculations {
   const goodsAvailableForSales = data.beginningInventory + data.purchases;
@@ -229,7 +274,7 @@ export function calculateFinancials(data: FinancialData): FinancialCalculations 
 
   const totalCapital = data.beginningCapital + netIncome + data.reservedCapital + data.additionalCapital;
 
-  // Bank WC loan is a balancing output: liability needed so assets = liabilities + equity.
+  // Working capital required from the bank when assets + equity do not cover operating liabilities.
   const bankWorkingCapitalFinancing = Math.max(
     0,
     totalAssets - operatingCurrentLiabilities - totalCapital
@@ -279,9 +324,34 @@ export function calculateFinancials(data: FinancialData): FinancialCalculations 
 }
 
 export function shiftStatementDate(dateStr: string, years: number): string {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  if (!year || !month || !day) return dateStr;
-  return `${year + years}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return shiftStatementDateByMonths(dateStr, years * 12);
+}
+
+/** Roll one month forward; inventory and equity reset every 12 projected months. */
+export function rollForwardOneMonth(data: FinancialData, projectedMonthIndex: number): FinancialData {
+  const calc = calculateFinancials(data);
+  const grossFixedAssets = data.building + data.propertyAndEquipment + data.vehicle;
+  const monthlyDepreciation = grossFixedAssets > 0 ? grossFixedAssets * 0.1 / 12 : 0;
+  const monthlyNetIncome = calc.netIncome / 12;
+
+  const updated: FinancialData = {
+    ...data,
+    statementDate: shiftStatementDateByMonths(data.statementDate, 1),
+    cashOnBank: data.cashOnBank + monthlyNetIncome,
+    accumulatedDepreciation: Math.min(
+      data.accumulatedDepreciation + monthlyDepreciation,
+      grossFixedAssets
+    ),
+  };
+
+  if (projectedMonthIndex > 0 && projectedMonthIndex % 12 === 0) {
+    updated.beginningInventory = data.endingInventory;
+    updated.beginningCapital = calc.totalCapital;
+    updated.reservedCapital = 0;
+    updated.additionalCapital = 0;
+  }
+
+  return updated;
 }
 
 /** Roll one year forward using prior period results as the next opening balances. */
@@ -305,18 +375,27 @@ export function rollForwardOneYear(data: FinancialData): FinancialData {
   };
 }
 
-export function projectFinancialData(base: FinancialData, yearsAhead: number): FinancialData {
-  if (yearsAhead <= 0) return base;
+export function projectFinancialData(
+  base: FinancialData,
+  yearsAhead: number,
+  monthsAhead = 0
+): FinancialData {
+  const totalMonths = getTotalProjectionMonths(yearsAhead, monthsAhead);
+  if (totalMonths <= 0) return base;
 
   let current = base;
-  for (let i = 0; i < yearsAhead; i++) {
-    current = rollForwardOneYear(current);
+  for (let i = 0; i < totalMonths; i++) {
+    current = rollForwardOneMonth(current, i + 1);
   }
   return current;
 }
 
-export function getProjectionLabel(yearsAhead: number): string {
-  if (yearsAhead === 0) return 'Current period';
-  if (yearsAhead === 1) return '1 year ahead';
-  return `${yearsAhead} years ahead`;
+export function getProjectionLabel(yearsAhead: number, monthsAhead = 0): string {
+  const { years, months } = normalizeProjectionPeriod(yearsAhead, monthsAhead);
+  if (years === 0 && months === 0) return 'Current period';
+
+  const parts: string[] = [];
+  if (years > 0) parts.push(years === 1 ? '1 year' : `${years} years`);
+  if (months > 0) parts.push(months === 1 ? '1 month' : `${months} months`);
+  return `${parts.join(' ')} ahead`;
 }

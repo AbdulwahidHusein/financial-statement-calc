@@ -1,6 +1,8 @@
 import {
   emptyFinancialData,
+  MAX_PROJECTION_MONTHS,
   MAX_PROJECTION_YEARS,
+  normalizeProjectionPeriod,
   type FinancialData,
 } from '@/lib/finance';
 
@@ -10,6 +12,7 @@ export type PersistedAppState = {
   version: 1;
   data: FinancialData;
   projectionYears: number;
+  projectionMonths: number;
   savedAt: string;
 };
 
@@ -62,10 +65,8 @@ function parseFinancialData(raw: unknown): FinancialData {
   return data;
 }
 
-function parseProjectionYears(raw: unknown): number {
-  const parsed = sanitizeNumber(raw);
-  const rounded = Math.trunc(parsed);
-  return Math.min(Math.max(rounded, 0), MAX_PROJECTION_YEARS);
+function parseProjectionPeriod(years: unknown, months: unknown) {
+  return normalizeProjectionPeriod(sanitizeNumber(years), sanitizeNumber(months));
 }
 
 export function loadPersistedState(): PersistedAppState | null {
@@ -80,12 +81,16 @@ export function loadPersistedState(): PersistedAppState | null {
 
     const record = parsed as Record<string, unknown>;
     const data = parseFinancialData(record.data);
-    const projectionYears = parseProjectionYears(record.projectionYears);
+    const { years: projectionYears, months: projectionMonths } = parseProjectionPeriod(
+      record.projectionYears,
+      record.projectionMonths
+    );
 
     return {
       version: 1,
       data,
       projectionYears,
+      projectionMonths,
       savedAt: typeof record.savedAt === 'string' ? record.savedAt : new Date().toISOString(),
     };
   } catch {
@@ -93,13 +98,19 @@ export function loadPersistedState(): PersistedAppState | null {
   }
 }
 
-export function savePersistedState(data: FinancialData, projectionYears: number): boolean {
+export function savePersistedState(
+  data: FinancialData,
+  projectionYears: number,
+  projectionMonths: number
+): boolean {
   if (typeof window === 'undefined') return false;
 
+  const period = parseProjectionPeriod(projectionYears, projectionMonths);
   const payload: PersistedAppState = {
     version: 1,
     data,
-    projectionYears: parseProjectionYears(projectionYears),
+    projectionYears: period.years,
+    projectionMonths: period.months,
     savedAt: new Date().toISOString(),
   };
 
@@ -116,3 +127,5 @@ export function clearPersistedState(): void {
   if (typeof window === 'undefined') return;
   localStorage.removeItem(STORAGE_KEY);
 }
+
+export { MAX_PROJECTION_YEARS, MAX_PROJECTION_MONTHS };

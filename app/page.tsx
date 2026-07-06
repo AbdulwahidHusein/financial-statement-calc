@@ -7,14 +7,17 @@ import {
   type FinancialCalculations,
   type FinancialData,
   MAX_PROJECTION_YEARS,
+  MAX_PROJECTION_MONTHS,
   calculateFinancials,
   calculateCashFlow,
   emptyFinancialData,
   getDefaultStatementDate,
   getPriorPeriodForCashFlow,
+  getProjectedStatementDate,
   getProjectionLabel,
+  getTotalProjectionMonths,
+  isProjectedPeriod,
   projectFinancialData,
-  shiftStatementDate,
 } from '@/lib/finance';
 import { clearPersistedState, loadPersistedState, savePersistedState } from '@/lib/storage';
 
@@ -47,6 +50,7 @@ export default function FinancialApp() {
   const [data, setData] = useState<FinancialData>(emptyFinancialData);
   const [activeTab, setActiveTab] = useState<'income' | 'balance' | 'cashflow' | 'ratios'>('income');
   const [projectionYears, setProjectionYears] = useState(0);
+  const [projectionMonths, setProjectionMonths] = useState(0);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -64,6 +68,7 @@ export default function FinancialApp() {
           statementDate: saved.data.statementDate || getDefaultStatementDate(),
         });
         setProjectionYears(saved.projectionYears);
+        setProjectionMonths(saved.projectionMonths);
       } else {
         setData({
           ...emptyFinancialData,
@@ -76,29 +81,41 @@ export default function FinancialApp() {
 
   useEffect(() => {
     if (!isStorageReady) return;
-    savePersistedState(data, projectionYears);
-  }, [data, projectionYears, isStorageReady]);
+    savePersistedState(data, projectionYears, projectionMonths);
+  }, [data, projectionYears, projectionMonths, isStorageReady]);
+
+  const totalProjectionMonths = getTotalProjectionMonths(projectionYears, projectionMonths);
+  const isProjected = isProjectedPeriod(projectionYears, projectionMonths);
 
   const displayData = useMemo(
-    () => projectFinancialData(data, projectionYears),
-    [data, projectionYears]
+    () => projectFinancialData(data, projectionYears, projectionMonths),
+    [data, projectionYears, projectionMonths]
   );
   const calc = useMemo(() => calculateFinancials(displayData), [displayData]);
   const previousCalc = useMemo(() => {
-    if (projectionYears <= 0) return null;
-    return calculateFinancials(projectFinancialData(data, projectionYears - 1));
-  }, [data, projectionYears]);
+    if (totalProjectionMonths <= 0) return null;
+    const priorMonths = totalProjectionMonths - 1;
+    return calculateFinancials(
+      projectFinancialData(data, Math.floor(priorMonths / 12), priorMonths % 12)
+    );
+  }, [data, totalProjectionMonths]);
   const previousPeriodLabel =
-    data.statementDate && projectionYears > 0
-      ? formatStatementDate(shiftStatementDate(data.statementDate, projectionYears - 1))
+    data.statementDate && totalProjectionMonths > 0
+      ? formatStatementDate(
+          getProjectedStatementDate(
+            data.statementDate,
+            Math.floor((totalProjectionMonths - 1) / 12),
+            (totalProjectionMonths - 1) % 12
+          )
+        )
       : null;
   const priorPeriodData = useMemo(
-    () => getPriorPeriodForCashFlow(data, projectionYears),
-    [data, projectionYears]
+    () => getPriorPeriodForCashFlow(data, projectionYears, projectionMonths),
+    [data, projectionYears, projectionMonths]
   );
   const cashFlow = useMemo(
-    () => calculateCashFlow(displayData, priorPeriodData, projectionYears === 0),
-    [displayData, priorPeriodData, projectionYears]
+    () => calculateCashFlow(displayData, priorPeriodData, totalProjectionMonths === 0),
+    [displayData, priorPeriodData, totalProjectionMonths]
   );
   const displayDateLabel = displayData.statementDate
     ? formatStatementDate(displayData.statementDate)
@@ -112,6 +129,7 @@ export default function FinancialApp() {
     }));
     if (name === 'statementDate' && !value) {
       setProjectionYears(0);
+      setProjectionMonths(0);
     }
   };
 
@@ -147,6 +165,7 @@ export default function FinancialApp() {
     clearPersistedState();
     setData({ ...emptyFinancialData, statementDate: getDefaultStatementDate() });
     setProjectionYears(0);
+    setProjectionMonths(0);
     setActiveTab('income');
     setIsSidebarOpen(false);
   };
@@ -278,10 +297,13 @@ export default function FinancialApp() {
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm font-medium"
                 />
               </div>
-              <StatementPeriodSelector
+              <ProjectionPeriodControls
                 statementDate={data.statementDate}
                 projectionYears={projectionYears}
-                onChange={setProjectionYears}
+                projectionMonths={projectionMonths}
+                onYearsChange={setProjectionYears}
+                onMonthsChange={setProjectionMonths}
+                variant="sidebar"
               />
             </div>
           </div>
@@ -380,13 +402,17 @@ export default function FinancialApp() {
               onTabChange={setActiveTab}
               statementDate={data.statementDate}
               projectionYears={projectionYears}
+              projectionMonths={projectionMonths}
+              isProjected={isProjected}
               displayDateLabel={displayDateLabel}
-              onProjectionChange={setProjectionYears}
+              onYearsChange={setProjectionYears}
+              onMonthsChange={setProjectionMonths}
             />
 
-            {(projectionYears > 0 || warnings.length > 0) && (
+            {(isProjected || warnings.length > 0) && (
               <CompactAlertStrip
                 projectionYears={projectionYears}
+                projectionMonths={projectionMonths}
                 displayDateLabel={displayDateLabel}
                 warnings={warnings}
               />
@@ -410,7 +436,7 @@ export default function FinancialApp() {
                     companyName={displayData.companyName}
                     title="Profit And Loss Statement"
                     displayDateLabel={displayDateLabel}
-                    projectionYears={projectionYears}
+                    isProjected={isProjected}
                     forExport={isExportingPdf}
                   />
 
@@ -463,7 +489,7 @@ export default function FinancialApp() {
                     companyName={displayData.companyName}
                     title="Balance Sheet"
                     displayDateLabel={displayDateLabel}
-                    projectionYears={projectionYears}
+                    isProjected={isProjected}
                     forExport={isExportingPdf}
                   />
 
@@ -544,7 +570,7 @@ export default function FinancialApp() {
                     companyName={displayData.companyName}
                     title="Statement of Cash Flows"
                     displayDateLabel={displayDateLabel}
-                    projectionYears={projectionYears}
+                    isProjected={isProjected}
                     forExport={isExportingPdf}
                   />
 
@@ -641,7 +667,7 @@ export default function FinancialApp() {
                     companyName={displayData.companyName}
                     title="Financial Ratios & Metrics"
                     displayDateLabel={displayDateLabel}
-                    projectionYears={projectionYears}
+                    isProjected={isProjected}
                     forExport={false}
                   />
 
@@ -661,26 +687,29 @@ export default function FinancialApp() {
                             <div className="p-2 bg-slate-50 rounded-lg print:bg-transparent print:p-0">
                               <Briefcase className="text-blue-500" size={24} />
                             </div>
-                            <span className={`text-xs font-semibold px-2 py-1 rounded-full print:px-0 ${calc.netWorkingCapital > 0 ? 'bg-emerald-100 text-emerald-700 print:bg-transparent print:text-emerald-800' : 'bg-rose-100 text-rose-700 print:bg-transparent print:text-rose-800'}`}>
-                              {calc.netWorkingCapital > 0 ? 'Healthy' : 'Needs Attention'}
+                            <span className={`text-xs font-semibold px-2 py-1 rounded-full print:px-0 ${calc.bankWorkingCapitalFinancing <= 0.005 ? 'bg-emerald-100 text-emerald-700 print:bg-transparent print:text-emerald-800' : 'bg-amber-100 text-amber-800 print:bg-transparent print:text-amber-900'}`}>
+                              {calc.bankWorkingCapitalFinancing <= 0.005 ? 'Self-funded' : 'Bank financing needed'}
                             </span>
                           </div>
-                          <h3 className="text-slate-500 font-semibold text-sm uppercase tracking-wider mb-1 print:text-slate-600">Net Working Capital</h3>
-                          <div className="text-3xl font-bold text-slate-900 mb-2 print:text-2xl">{formatBirr(calc.netWorkingCapital)}</div>
-                          <p className="text-slate-500 text-sm leading-relaxed print:text-slate-600">Current assets minus all current liabilities, including bank working capital loan</p>
-                          <p className="text-xs text-slate-400 mt-2 print:text-slate-500">Healthy: positive working capital</p>
+                          <h3 className="text-slate-500 font-semibold text-sm uppercase tracking-wider mb-1 print:text-slate-600">Working Capital</h3>
+                          <div className="text-3xl font-bold text-slate-900 mb-2 print:text-2xl">{formatBirr(calc.bankWorkingCapitalFinancing)}</div>
+                          <p className="text-slate-500 text-sm leading-relaxed print:text-slate-600">
+                            Amount the business needs from the bank — calculated when current assets and equity do not fully cover operating liabilities
+                          </p>
+                          <p className="text-xs text-slate-400 mt-2 print:text-slate-500">Healthy: no bank working capital required</p>
                         </div>
                         <div className="w-px bg-slate-200 hidden md:block print:block"></div>
                         <div className="h-px bg-slate-200 block md:hidden print:hidden"></div>
                         <div className="flex-1 flex flex-col justify-center space-y-4">
                           <div>
-                            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Financed by Bank</div>
-                            <div className="text-xl font-bold text-slate-800">{formatBirr(calc.bankWorkingCapitalFinancing)}</div>
-                            <p className="text-xs text-slate-400 mt-1">Calculated from balance sheet</p>
+                            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Total Working Capital Gap</div>
+                            <div className="text-xl font-bold text-slate-800">{formatBirr(calc.grossWorkingCapital)}</div>
+                            <p className="text-xs text-slate-400 mt-1">Current assets minus operating payables</p>
                           </div>
                           <div>
                             <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Financed by Business</div>
                             <div className="text-xl font-bold text-slate-800">{formatBirr(calc.businessFundedWorkingCapital)}</div>
+                            <p className="text-xs text-slate-400 mt-1">Portion covered without bank working capital</p>
                           </div>
                         </div>
                       </div>
@@ -829,10 +858,10 @@ function RatioYearComparison({
       unit: 'percent' as const,
     },
     {
-      label: 'Net Working Capital',
-      previous: formatCurrency(previousCalc.netWorkingCapital),
-      current: formatCurrency(calc.netWorkingCapital),
-      diff: calc.netWorkingCapital - previousCalc.netWorkingCapital,
+      label: 'Working Capital',
+      previous: formatCurrency(previousCalc.bankWorkingCapitalFinancing),
+      current: formatCurrency(calc.bankWorkingCapitalFinancing),
+      diff: calc.bankWorkingCapitalFinancing - previousCalc.bankWorkingCapitalFinancing,
       unit: 'currency' as const,
     },
   ];
@@ -876,46 +905,153 @@ function RatioYearComparison({
   );
 }
 
-function StatementPeriodSelector({
+function ProjectionPeriodControls({
   statementDate,
   projectionYears,
-  onChange,
+  projectionMonths,
+  onYearsChange,
+  onMonthsChange,
+  variant = 'sidebar',
 }: {
   statementDate: string;
   projectionYears: number;
-  onChange: (years: number) => void;
+  projectionMonths: number;
+  onYearsChange: (years: number) => void;
+  onMonthsChange: (months: number) => void;
+  variant?: 'sidebar' | 'toolbar';
 }) {
-  const options = Array.from({ length: MAX_PROJECTION_YEARS + 1 }, (_, years) => {
-    const dateLabel = statementDate
-      ? formatStatementDate(shiftStatementDate(statementDate, years))
-      : null;
+  const projectedDateLabel = statementDate
+    ? formatStatementDate(getProjectedStatementDate(statementDate, projectionYears, projectionMonths))
+    : null;
+  const periodLabel = getProjectionLabel(projectionYears, projectionMonths);
+  const isProjected = isProjectedPeriod(projectionYears, projectionMonths);
 
-    return {
-      years,
-      label:
-        years === 0
-          ? `Current period${dateLabel ? ` (${dateLabel})` : ''}`
-          : `${getProjectionLabel(years)}${dateLabel ? ` — ${dateLabel}` : ''}`,
-    };
-  });
+  const toolbarSelectClass =
+    'min-w-[4.5rem] max-w-[5.5rem] px-2 py-1.5 bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-xs sm:text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed';
+  const sidebarSelectClass =
+    'w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed';
+
+  const monthOptions = Array.from({ length: MAX_PROJECTION_MONTHS + 1 }, (_, months) => ({
+    value: months,
+    label:
+      variant === 'toolbar'
+        ? months === 0
+          ? '0 mo'
+          : `${months} mo`
+        : months === 0
+          ? '0 months'
+          : `${months} month${months === 1 ? '' : 's'}`,
+  }));
+
+  const yearOptions = Array.from({ length: MAX_PROJECTION_YEARS + 1 }, (_, years) => ({
+    value: years,
+    label:
+      variant === 'toolbar'
+        ? years === 0
+          ? '0 yr'
+          : `${years} yr`
+        : years === 0
+          ? '0 years'
+          : `${years} year${years === 1 ? '' : 's'}`,
+  }));
+
+  if (variant === 'toolbar') {
+    return (
+      <div className="flex items-center gap-1 min-w-0">
+        <label htmlFor="report-months-select" className="sr-only">
+          Months ahead
+        </label>
+        <select
+          id="report-months-select"
+          value={projectionMonths}
+          onChange={(e) => onMonthsChange(Number(e.target.value))}
+          disabled={!statementDate}
+          title={statementDate ? `${periodLabel} · ${projectedDateLabel}` : 'Set a statement date first'}
+          className={toolbarSelectClass}
+        >
+          {monthOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <label htmlFor="report-years-select" className="sr-only">
+          Years ahead
+        </label>
+        <select
+          id="report-years-select"
+          value={projectionYears}
+          onChange={(e) => onYearsChange(Number(e.target.value))}
+          disabled={!statementDate}
+          title={statementDate ? `${periodLabel} · ${projectedDateLabel}` : 'Set a statement date first'}
+          className={toolbarSelectClass}
+        >
+          {yearOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  }
 
   return (
     <div>
       <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
         View Period
       </label>
-      <select
-        value={projectionYears}
-        onChange={(e) => onChange(Number(e.target.value))}
-        disabled={!statementDate}
-        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {options.map((option) => (
-          <option key={option.years} value={option.years}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label htmlFor="sidebar-months-select" className="block text-[11px] text-slate-400 mb-1">
+            Months
+          </label>
+          <select
+            id="sidebar-months-select"
+            value={projectionMonths}
+            onChange={(e) => onMonthsChange(Number(e.target.value))}
+            disabled={!statementDate}
+            className={sidebarSelectClass}
+          >
+            {monthOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="sidebar-years-select" className="block text-[11px] text-slate-400 mb-1">
+            Years
+          </label>
+          <select
+            id="sidebar-years-select"
+            value={projectionYears}
+            onChange={(e) => onYearsChange(Number(e.target.value))}
+            disabled={!statementDate}
+            className={sidebarSelectClass}
+          >
+            {yearOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      {statementDate && (
+        <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+          {isProjected ? (
+            <>
+              <span className="font-medium text-slate-700">{periodLabel}</span>
+              {' · As of '}
+              {projectedDateLabel}
+            </>
+          ) : (
+            <>Current period · As of {projectedDateLabel}</>
+          )}
+        </p>
+      )}
       {!statementDate && (
         <p className="text-xs text-slate-400 mt-1.5">Set a statement date to view future periods.</p>
       )}
@@ -928,15 +1064,21 @@ function ReportToolbar({
   onTabChange,
   statementDate,
   projectionYears,
+  projectionMonths,
+  isProjected,
   displayDateLabel,
-  onProjectionChange,
+  onYearsChange,
+  onMonthsChange,
 }: {
   activeTab: 'income' | 'balance' | 'cashflow' | 'ratios';
   onTabChange: (tab: 'income' | 'balance' | 'cashflow' | 'ratios') => void;
   statementDate: string;
   projectionYears: number;
+  projectionMonths: number;
+  isProjected: boolean;
   displayDateLabel: string;
-  onProjectionChange: (years: number) => void;
+  onYearsChange: (years: number) => void;
+  onMonthsChange: (months: number) => void;
 }) {
   const tabs = [
     { id: 'income' as const, label: 'P&L', fullLabel: 'Profit & Loss', icon: FileText },
@@ -969,38 +1111,27 @@ function ReportToolbar({
           ))}
         </div>
 
-        <div className="flex items-center gap-2 px-1 sm:px-0 sm:border-l sm:border-slate-200 sm:pl-3 flex-shrink-0">
+        <div className="flex items-center gap-2 px-1 sm:px-0 sm:border-l sm:border-slate-200 sm:pl-3 flex-shrink-0 min-w-0">
           <div className="hidden md:flex items-center gap-1.5 text-xs text-slate-500 min-w-0">
             <CalendarRange size={14} className="text-indigo-600 flex-shrink-0" />
             <span className="truncate">
               {displayDateLabel}
-              {projectionYears > 0 && (
-                <span className="ml-1.5 text-indigo-600 font-medium">· Projected</span>
-              )}
+              {isProjected && <span className="ml-1.5 text-indigo-600 font-medium">· Projected</span>}
             </span>
           </div>
-          <label htmlFor="report-period-select" className="sr-only">
-            View period
-          </label>
-          <select
-            id="report-period-select"
-            value={projectionYears}
-            onChange={(e) => onProjectionChange(Number(e.target.value))}
-            disabled={!statementDate}
-            title={statementDate ? `Viewing ${displayDateLabel}` : 'Set a statement date first'}
-            className="w-full sm:w-auto min-w-0 sm:min-w-[9.5rem] px-2 py-1.5 bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-xs sm:text-sm font-medium disabled:opacity-50"
-          >
-            {Array.from({ length: MAX_PROJECTION_YEARS + 1 }, (_, years) => (
-              <option key={years} value={years}>
-                {getProjectionLabel(years)}
-              </option>
-            ))}
-          </select>
+          <ProjectionPeriodControls
+            statementDate={statementDate}
+            projectionYears={projectionYears}
+            projectionMonths={projectionMonths}
+            onYearsChange={onYearsChange}
+            onMonthsChange={onMonthsChange}
+            variant="toolbar"
+          />
         </div>
       </div>
       <div className="md:hidden px-2 pb-1.5 text-[11px] text-slate-500 truncate border-t border-slate-200/60">
         As of <span className="font-medium text-slate-700">{displayDateLabel}</span>
-        {projectionYears > 0 && <span className="text-indigo-600"> · Projected</span>}
+        {isProjected && <span className="text-indigo-600"> · Projected</span>}
       </div>
     </div>
   );
@@ -1008,27 +1139,31 @@ function ReportToolbar({
 
 function CompactAlertStrip({
   projectionYears,
+  projectionMonths,
   displayDateLabel,
   warnings,
 }: {
   projectionYears: number;
+  projectionMonths: number;
   displayDateLabel: string;
   warnings: string[];
 }) {
+  const isProjected = isProjectedPeriod(projectionYears, projectionMonths);
+
   return (
     <div className="flex-none border-b border-slate-200 bg-slate-50 px-2 py-1.5 print:hidden space-y-1">
-      {projectionYears > 0 && (
+      {isProjected && (
         <details className="group rounded-md border border-indigo-200/80 bg-indigo-50/80 open:bg-indigo-50">
           <summary className="flex cursor-pointer list-none items-center gap-2 px-2.5 py-1.5 text-xs font-medium text-indigo-900 [&::-webkit-details-marker]:hidden">
             <Activity size={14} className="flex-shrink-0 text-indigo-600" />
             <span className="flex-1 min-w-0 truncate">
-              {getProjectionLabel(projectionYears)} · As of {displayDateLabel}
+              {getProjectionLabel(projectionYears, projectionMonths)} · As of {displayDateLabel}
             </span>
             <span className="text-[10px] uppercase tracking-wide text-indigo-500 flex-shrink-0 group-open:hidden">Details</span>
           </summary>
           <p className="px-2.5 pb-2 text-[11px] leading-relaxed text-indigo-900/90">
-            Each year rolls inventory, equity, cash, tax payable, and 10% fixed-asset depreciation forward.
-            Sales and expenses stay the same. Bank working capital loan is recalculated each period.
+            Cash and depreciation accrue monthly. Every 12 months, inventory and equity roll forward. Sales and
+            expenses stay the same on the P&amp;L.
           </p>
         </details>
       )}
@@ -1050,13 +1185,13 @@ function ReportStatementHeader({
   companyName,
   title,
   displayDateLabel,
-  projectionYears,
+  isProjected = false,
   forExport = false,
 }: {
   companyName: string;
   title: string;
   displayDateLabel: string;
-  projectionYears: number;
+  isProjected?: boolean;
   forExport?: boolean;
 }) {
   return (
@@ -1069,9 +1204,7 @@ function ReportStatementHeader({
       </h2>
       <p className={`text-sm font-medium text-slate-600 uppercase mt-1 ${forExport ? 'block' : 'hidden print:block'}`}>
         As of {displayDateLabel}
-        {projectionYears > 0 && (
-          <span className="ml-2 normal-case text-indigo-600">(Projected)</span>
-        )}
+        {isProjected && <span className="ml-2 normal-case text-indigo-600">(Projected)</span>}
       </p>
     </div>
   );
