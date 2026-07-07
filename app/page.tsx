@@ -12,13 +12,19 @@ import {
   calculateCashFlow,
   emptyFinancialData,
   getDefaultStatementDate,
-  getPriorPeriodForCashFlow,
   getProjectedStatementDate,
   getProjectionLabel,
   getTotalProjectionMonths,
   isProjectedPeriod,
-  projectFinancialData,
 } from '@/lib/finance';
+import {
+  ensurePeriodSnapshot,
+  getPeriodKey,
+  getPriorPeriodCoords,
+  parsePeriodKey,
+  resolvePeriodData,
+  type PeriodKey,
+} from '@/lib/periods';
 import { clearPersistedState, loadPersistedState, savePersistedState } from '@/lib/storage';
 
 const formatCurrency = (amount: number) => {
@@ -47,7 +53,8 @@ const getStatementYear = (dateStr: string) => {
 };
 
 export default function FinancialApp() {
-  const [data, setData] = useState<FinancialData>(emptyFinancialData);
+  const [baseStatementDate, setBaseStatementDate] = useState(getDefaultStatementDate());
+  const [periodSnapshots, setPeriodSnapshots] = useState<Record<PeriodKey, FinancialData>>({});
   const [activeTab, setActiveTab] = useState<'income' | 'balance' | 'cashflow' | 'ratios'>('income');
   const [projectionYears, setProjectionYears] = useState(0);
   const [projectionMonths, setProjectionMonths] = useState(0);
@@ -59,20 +66,21 @@ export default function FinancialApp() {
   const balanceReportRef = useRef<HTMLDivElement>(null);
   const cashFlowReportRef = useRef<HTMLDivElement>(null);
 
+  const currentPeriodKey = getPeriodKey(projectionYears, projectionMonths);
+
   useEffect(() => {
     const saved = loadPersistedState();
     startTransition(() => {
       if (saved) {
-        setData({
-          ...saved.data,
-          statementDate: saved.data.statementDate || getDefaultStatementDate(),
-        });
+        setBaseStatementDate(saved.baseStatementDate || getDefaultStatementDate());
+        setPeriodSnapshots(saved.periodSnapshots);
         setProjectionYears(saved.projectionYears);
         setProjectionMonths(saved.projectionMonths);
       } else {
-        setData({
-          ...emptyFinancialData,
-          statementDate: getDefaultStatementDate(),
+        const today = getDefaultStatementDate();
+        setBaseStatementDate(today);
+        setPeriodSnapshots({
+          '0-0': { ...emptyFinancialData, statementDate: today },
         });
       }
       setIsStorageReady(true);
@@ -81,38 +89,67 @@ export default function FinancialApp() {
 
   useEffect(() => {
     if (!isStorageReady) return;
-    savePersistedState(data, projectionYears, projectionMonths);
-  }, [data, projectionYears, projectionMonths, isStorageReady]);
+    savePersistedState(baseStatementDate, periodSnapshots, projectionYears, projectionMonths);
+  }, [baseStatementDate, periodSnapshots, projectionYears, projectionMonths, isStorageReady]);
+
+  const handleProjectionPeriodChange = (years: number, months: number) => {
+    setPeriodSnapshots((prev) => ensurePeriodSnapshot(prev, years, months, baseStatementDate));
+    setProjectionYears(years);
+    setProjectionMonths(months);
+  };
 
   const totalProjectionMonths = getTotalProjectionMonths(projectionYears, projectionMonths);
   const isProjected = isProjectedPeriod(projectionYears, projectionMonths);
 
   const displayData = useMemo(
-    () => projectFinancialData(data, projectionYears, projectionMonths),
-    [data, projectionYears, projectionMonths]
+    () => resolvePeriodData(projectionYears, projectionMonths, periodSnapshots, baseStatementDate),
+    [projectionYears, projectionMonths, periodSnapshots, baseStatementDate]
   );
   const calc = useMemo(() => calculateFinancials(displayData), [displayData]);
-  const previousCalc = useMemo(() => {
-    if (totalProjectionMonths <= 0) return null;
-    const priorMonths = totalProjectionMonths - 1;
-    return calculateFinancials(
-      projectFinancialData(data, Math.floor(priorMonths / 12), priorMonths % 12)
+
+  const priorPeriodCoords = getPriorPeriodCoords(projectionYears, projectionMonths);
+  const priorPeriodData = useMemo(() => {
+    if (!priorPeriodCoords) {
+      const current = resolvePeriodData(0, 0, periodSnapshots, baseStatementDate);
+      return {
+        ...current,
+        endingInventory: current.beginningInventory,
+        cashOnBank: 0,
+        otherReceivables: 0,
+        employeeBenefitPayable: 0,
+        creditPurchasePayable: 0,
+        outstandingFinancing: 0,
+        profitTax: 0,
+        accumulatedDepreciation: 0,
+        reservedCapital: 0,
+        additionalCapital: 0,
+      };
+    }
+    return resolvePeriodData(
+      priorPeriodCoords.years,
+      priorPeriodCoords.months,
+      periodSnapshots,
+      baseStatementDate
     );
-  }, [data, totalProjectionMonths]);
+  }, [priorPeriodCoords, periodSnapshots, baseStatementDate]);
+
+  const previousCalc = useMemo(() => {
+    if (!priorPeriodCoords) return null;
+    return calculateFinancials(priorPeriodData);
+  }, [priorPeriodCoords, priorPeriodData]);
+
   const previousPeriodLabel =
-    data.statementDate && totalProjectionMonths > 0
+    priorPeriodCoords && baseStatementDate
       ? formatStatementDate(
-          getProjectedStatementDate(
-            data.statementDate,
-            Math.floor((totalProjectionMonths - 1) / 12),
-            (totalProjectionMonths - 1) % 12
-          )
+          resolvePeriodData(
+            priorPeriodCoords.years,
+            priorPeriodCoords.months,
+            periodSnapshots,
+            baseStatementDate
+          ).statementDate
         )
       : null;
-  const priorPeriodData = useMemo(
-    () => getPriorPeriodForCashFlow(data, projectionYears, projectionMonths),
-    [data, projectionYears, projectionMonths]
-  );
+
   const cashFlow = useMemo(
     () => calculateCashFlow(displayData, priorPeriodData, totalProjectionMonths === 0),
     [displayData, priorPeriodData, totalProjectionMonths]
@@ -121,12 +158,52 @@ export default function FinancialApp() {
     ? formatStatementDate(displayData.statementDate)
     : 'DATE';
 
+  const updateCurrentPeriod = (updater: (prev: FinancialData) => FinancialData) => {
+    setPeriodSnapshots((prev) => {
+      const current = resolvePeriodData(projectionYears, projectionMonths, prev, baseStatementDate);
+      return {
+        ...prev,
+        [currentPeriodKey]: updater(current),
+      };
+    });
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setData((prev) => ({
+
+    if (name === 'statementDate' && projectionYears === 0 && projectionMonths === 0) {
+      setBaseStatementDate(value);
+      setPeriodSnapshots((prev) => {
+        const next: Record<PeriodKey, FinancialData> = { ...prev };
+        for (const key of Object.keys(next) as PeriodKey[]) {
+          const { years, months } = parsePeriodKey(key);
+          next[key] = {
+            ...next[key],
+            statementDate: value
+              ? resolvePeriodData(years, months, prev, value).statementDate
+              : '',
+          };
+        }
+        if (value) {
+          next['0-0'] = {
+            ...(next['0-0'] ?? resolvePeriodData(0, 0, prev, value)),
+            statementDate: value,
+          };
+        }
+        return next;
+      });
+      if (!value) {
+        setProjectionYears(0);
+        setProjectionMonths(0);
+      }
+      return;
+    }
+
+    updateCurrentPeriod((prev) => ({
       ...prev,
       [name]: value,
     }));
+
     if (name === 'statementDate' && !value) {
       setProjectionYears(0);
       setProjectionMonths(0);
@@ -134,7 +211,7 @@ export default function FinancialApp() {
   };
 
   const handleNumberChange = (name: keyof FinancialData, value: number) => {
-    setData((prev) => ({
+    updateCurrentPeriod((prev) => ({
       ...prev,
       [name]: value,
     }));
@@ -159,11 +236,15 @@ export default function FinancialApp() {
   };
 
   const handleClearAll = () => {
-    const confirmed = window.confirm('Clear all entered data? This will reset every field.');
+    const confirmed = window.confirm('Clear all entered data? This will reset every field and all projection periods.');
     if (!confirmed) return;
 
+    const today = getDefaultStatementDate();
     clearPersistedState();
-    setData({ ...emptyFinancialData, statementDate: getDefaultStatementDate() });
+    setBaseStatementDate(today);
+    setPeriodSnapshots({
+      '0-0': { ...emptyFinancialData, statementDate: today },
+    });
     setProjectionYears(0);
     setProjectionMonths(0);
     setActiveTab('income');
@@ -182,7 +263,7 @@ export default function FinancialApp() {
       const { fileDate } = getExportDateParts();
       await exportElementToPdf({
         pages: [incomeReportRef.current, balanceReportRef.current, cashFlowReportRef.current],
-        companyName: data.companyName,
+        companyName: displayData.companyName,
         currentDateLabel: displayDateLabel,
         fileDate,
       });
@@ -209,7 +290,7 @@ export default function FinancialApp() {
           <div className="hidden sm:block bg-indigo-600 p-1.5 rounded-lg text-white flex-shrink-0">
             <Briefcase size={20} />
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0">+
             <h1 className="text-base md:text-lg font-semibold tracking-tight truncate">Financial Statement Generator</h1>
             <p className="hidden md:block text-xs text-slate-500 font-medium">Create professional P&L and Balance Sheets</p>
           </div>
@@ -282,7 +363,7 @@ export default function FinancialApp() {
                 <input
                   type="text"
                   name="companyName"
-                  value={data.companyName}
+                  value={displayData.companyName}
                   onChange={handleInputChange}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm font-medium"
                 />
@@ -292,17 +373,21 @@ export default function FinancialApp() {
                 <input
                   type="date"
                   name="statementDate"
-                  value={data.statementDate}
+                  value={displayData.statementDate}
                   onChange={handleInputChange}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm font-medium"
+                  disabled={isProjected}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm font-medium disabled:opacity-60 disabled:cursor-not-allowed"
                 />
+                {isProjected && (
+                  <p className="text-xs text-slate-400 mt-1.5">Date is set from the current period plus your projection.</p>
+                )}
               </div>
               <ProjectionPeriodControls
-                statementDate={data.statementDate}
+                statementDate={displayData.statementDate}
                 projectionYears={projectionYears}
                 projectionMonths={projectionMonths}
-                onYearsChange={setProjectionYears}
-                onMonthsChange={setProjectionMonths}
+                onYearsChange={(years) => handleProjectionPeriodChange(years, projectionMonths)}
+                onMonthsChange={(months) => handleProjectionPeriodChange(projectionYears, months)}
                 variant="sidebar"
               />
             </div>
@@ -316,14 +401,14 @@ export default function FinancialApp() {
               </h2>
             </div>
             <div className="p-5 space-y-4">
-              <InputField label="Sales (Revenue)" name="sales" value={data.sales} onChange={handleNumberChange} />
+              <InputField label="Sales (Revenue)" name="sales" value={displayData.sales} onChange={handleNumberChange} />
 
               <div className="pt-2 border-t border-slate-100">
                 <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Cost of Goods Sold</h3>
                 <div className="space-y-3">
-                  <InputField label="Beginning Inventory" name="beginningInventory" value={data.beginningInventory} onChange={handleNumberChange} />
-                  <InputField label="Purchases" name="purchases" value={data.purchases} onChange={handleNumberChange} />
-                  <InputField label="Ending Inventory" name="endingInventory" value={data.endingInventory} onChange={handleNumberChange} />
+                  <InputField label="Beginning Inventory" name="beginningInventory" value={displayData.beginningInventory} onChange={handleNumberChange} />
+                  <InputField label="Purchases" name="purchases" value={displayData.purchases} onChange={handleNumberChange} />
+                  <InputField label="Ending Inventory" name="endingInventory" value={displayData.endingInventory} onChange={handleNumberChange} />
                 </div>
                 <p className="text-xs text-slate-400 mt-2">Ending inventory is also used on the balance sheet.</p>
               </div>
@@ -331,17 +416,17 @@ export default function FinancialApp() {
               <div className="pt-2 border-t border-slate-100">
                 <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Operating Expenses</h3>
                 <div className="space-y-3">
-                  <InputField label="Salary and Benefit" name="salaryAndBenefit" value={data.salaryAndBenefit} onChange={handleNumberChange} />
-                  <InputField label="Transportation Cost" name="transportationCost" value={data.transportationCost} onChange={handleNumberChange} />
-                  <InputField label="Loading and Unloading" name="loadingAndUnloading" value={data.loadingAndUnloading} onChange={handleNumberChange} />
-                  <InputField label="Repair and Maintenance" name="repairAndMaintenance" value={data.repairAndMaintenance} onChange={handleNumberChange} />
-                  <InputField label="Stationary and Printing" name="stationaryAndPrinting" value={data.stationaryAndPrinting} onChange={handleNumberChange} />
-                  <InputField label="Miscellanies & Other" name="miscellaneousExpense" value={data.miscellaneousExpense} onChange={handleNumberChange} />
+                  <InputField label="Salary and Benefit" name="salaryAndBenefit" value={displayData.salaryAndBenefit} onChange={handleNumberChange} />
+                  <InputField label="Transportation Cost" name="transportationCost" value={displayData.transportationCost} onChange={handleNumberChange} />
+                  <InputField label="Loading and Unloading" name="loadingAndUnloading" value={displayData.loadingAndUnloading} onChange={handleNumberChange} />
+                  <InputField label="Repair and Maintenance" name="repairAndMaintenance" value={displayData.repairAndMaintenance} onChange={handleNumberChange} />
+                  <InputField label="Stationary and Printing" name="stationaryAndPrinting" value={displayData.stationaryAndPrinting} onChange={handleNumberChange} />
+                  <InputField label="Miscellanies & Other" name="miscellaneousExpense" value={displayData.miscellaneousExpense} onChange={handleNumberChange} />
                 </div>
               </div>
 
               <div className="pt-2 border-t border-slate-100">
-                <InputField label="Profit Tax" name="profitTax" value={data.profitTax} onChange={handleNumberChange} />
+                <InputField label="Profit Tax" name="profitTax" value={displayData.profitTax} onChange={handleNumberChange} />
                 <p className="text-xs text-slate-400 mt-2">Also used as profit tax payable on the balance sheet.</p>
               </div>
             </div>
@@ -358,36 +443,36 @@ export default function FinancialApp() {
               <div className="pt-1">
                 <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Current Assets</h3>
                 <div className="space-y-3">
-                  <InputField label="Cash on Hand / Bank" name="cashOnBank" value={data.cashOnBank} onChange={handleNumberChange} />
-                  <InputField label="Other Receivables" name="otherReceivables" value={data.otherReceivables} onChange={handleNumberChange} />
+                  <InputField label="Cash on Hand / Bank" name="cashOnBank" value={displayData.cashOnBank} onChange={handleNumberChange} />
+                  <InputField label="Other Receivables" name="otherReceivables" value={displayData.otherReceivables} onChange={handleNumberChange} />
                 </div>
               </div>
 
               <div className="pt-2 border-t border-slate-100">
                 <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Fixed Assets</h3>
                 <div className="space-y-3">
-                  <InputField label="Building" name="building" value={data.building} onChange={handleNumberChange} />
-                  <InputField label="Property and Equipment" name="propertyAndEquipment" value={data.propertyAndEquipment} onChange={handleNumberChange} />
-                  <InputField label="Vehicle" name="vehicle" value={data.vehicle} onChange={handleNumberChange} />
-                  <InputField label="Less Acc. Depreciation" name="accumulatedDepreciation" value={data.accumulatedDepreciation} onChange={handleNumberChange} />
+                  <InputField label="Building" name="building" value={displayData.building} onChange={handleNumberChange} />
+                  <InputField label="Property and Equipment" name="propertyAndEquipment" value={displayData.propertyAndEquipment} onChange={handleNumberChange} />
+                  <InputField label="Vehicle" name="vehicle" value={displayData.vehicle} onChange={handleNumberChange} />
+                  <InputField label="Less Acc. Depreciation" name="accumulatedDepreciation" value={displayData.accumulatedDepreciation} onChange={handleNumberChange} />
                 </div>
               </div>
 
               <div className="pt-2 border-t border-slate-100">
                 <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Liabilities</h3>
                 <div className="space-y-3">
-                  <InputField label="Employee Benefit / Salary" name="employeeBenefitPayable" value={data.employeeBenefitPayable} onChange={handleNumberChange} />
-                  <InputField label="Credit Purchase Payable" name="creditPurchasePayable" value={data.creditPurchasePayable} onChange={handleNumberChange} />
-                  <InputField label="Outstanding Financing" name="outstandingFinancing" value={data.outstandingFinancing} onChange={handleNumberChange} />
+                  <InputField label="Employee Benefit / Salary" name="employeeBenefitPayable" value={displayData.employeeBenefitPayable} onChange={handleNumberChange} />
+                  <InputField label="Credit Purchase Payable" name="creditPurchasePayable" value={displayData.creditPurchasePayable} onChange={handleNumberChange} />
+                  <InputField label="Outstanding Financing" name="outstandingFinancing" value={displayData.outstandingFinancing} onChange={handleNumberChange} />
                 </div>
               </div>
 
               <div className="pt-2 border-t border-slate-100">
                 <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Equity</h3>
                 <div className="space-y-3">
-                  <InputField label="Beginning Capital" name="beginningCapital" value={data.beginningCapital} onChange={handleNumberChange} />
-                  <InputField label="Additional Capital" name="additionalCapital" value={data.additionalCapital} onChange={handleNumberChange} />
-                  <InputField label="Reserved Capital" name="reservedCapital" value={data.reservedCapital} onChange={handleNumberChange} />
+                  <InputField label="Beginning Capital" name="beginningCapital" value={displayData.beginningCapital} onChange={handleNumberChange} />
+                  <InputField label="Additional Capital" name="additionalCapital" value={displayData.additionalCapital} onChange={handleNumberChange} />
+                  <InputField label="Reserved Capital" name="reservedCapital" value={displayData.reservedCapital} onChange={handleNumberChange} />
                 </div>
               </div>
             </div>
@@ -400,13 +485,13 @@ export default function FinancialApp() {
             <ReportToolbar
               activeTab={activeTab}
               onTabChange={setActiveTab}
-              statementDate={data.statementDate}
+              statementDate={displayData.statementDate}
               projectionYears={projectionYears}
               projectionMonths={projectionMonths}
               isProjected={isProjected}
               displayDateLabel={displayDateLabel}
-              onYearsChange={setProjectionYears}
-              onMonthsChange={setProjectionMonths}
+              onYearsChange={(years) => handleProjectionPeriodChange(years, projectionMonths)}
+              onMonthsChange={(months) => handleProjectionPeriodChange(projectionYears, months)}
             />
 
             {(isProjected || warnings.length > 0) && (
@@ -1162,8 +1247,8 @@ function CompactAlertStrip({
             <span className="text-[10px] uppercase tracking-wide text-indigo-500 flex-shrink-0 group-open:hidden">Details</span>
           </summary>
           <p className="px-2.5 pb-2 text-[11px] leading-relaxed text-indigo-900/90">
-            Cash and depreciation accrue monthly. Every 12 months, inventory and equity roll forward. Sales and
-            expenses stay the same on the P&amp;L.
+            Each period is saved separately. New periods start with P&amp;L fields cleared; opening inventory and
+            capital come from the prior period&apos;s results. Cash and depreciation roll forward monthly.
           </p>
         </details>
       )}

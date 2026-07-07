@@ -1,16 +1,19 @@
 import {
   emptyFinancialData,
+  getDefaultStatementDate,
   MAX_PROJECTION_MONTHS,
   MAX_PROJECTION_YEARS,
   normalizeProjectionPeriod,
   type FinancialData,
 } from '@/lib/finance';
+import { getPeriodKey, type PeriodKey } from '@/lib/periods';
 
-const STORAGE_KEY = 'financial-statement-calc:v1';
+const STORAGE_KEY = 'financial-statement-calc:v2';
 
 export type PersistedAppState = {
-  version: 1;
-  data: FinancialData;
+  version: 2;
+  baseStatementDate: string;
+  periodSnapshots: Record<PeriodKey, FinancialData>;
   projectionYears: number;
   projectionMonths: number;
   savedAt: string;
@@ -69,37 +72,87 @@ function parseProjectionPeriod(years: unknown, months: unknown) {
   return normalizeProjectionPeriod(sanitizeNumber(years), sanitizeNumber(months));
 }
 
+function parsePeriodSnapshots(raw: unknown): Record<PeriodKey, FinancialData> {
+  if (!raw || typeof raw !== 'object') return {};
+
+  const snapshots: Record<PeriodKey, FinancialData> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (/^\d+-\d+$/.test(key)) {
+      snapshots[key as PeriodKey] = parseFinancialData(value);
+    }
+  }
+  return snapshots;
+}
+
+function migrateV1(record: Record<string, unknown>): PersistedAppState {
+  const data = parseFinancialData(record.data);
+  const baseStatementDate = data.statementDate || getDefaultStatementDate();
+  const currentKey = getPeriodKey(0, 0);
+
+  return {
+    version: 2,
+    baseStatementDate,
+    periodSnapshots: {
+      [currentKey]: { ...data, statementDate: baseStatementDate },
+    },
+    projectionYears: parseProjectionPeriod(record.projectionYears, record.projectionMonths).years,
+    projectionMonths: parseProjectionPeriod(record.projectionYears, record.projectionMonths).months,
+    savedAt: typeof record.savedAt === 'string' ? record.savedAt : new Date().toISOString(),
+  };
+}
+
 export function loadPersistedState(): PersistedAppState | null {
   if (typeof window === 'undefined') return null;
 
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const rawV2 = localStorage.getItem(STORAGE_KEY);
+    const rawV1 = localStorage.getItem('financial-statement-calc:v1');
+    const raw = rawV2 ?? rawV1;
     if (!raw) return null;
 
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return null;
 
     const record = parsed as Record<string, unknown>;
-    const data = parseFinancialData(record.data);
-    const { years: projectionYears, months: projectionMonths } = parseProjectionPeriod(
-      record.projectionYears,
-      record.projectionMonths
-    );
 
-    return {
-      version: 1,
-      data,
-      projectionYears,
-      projectionMonths,
-      savedAt: typeof record.savedAt === 'string' ? record.savedAt : new Date().toISOString(),
-    };
+    if (record.version === 2) {
+      const { years: projectionYears, months: projectionMonths } = parseProjectionPeriod(
+        record.projectionYears,
+        record.projectionMonths
+      );
+      const baseStatementDate =
+        typeof record.baseStatementDate === 'string' && record.baseStatementDate
+          ? record.baseStatementDate
+          : getDefaultStatementDate();
+      const periodSnapshots = parsePeriodSnapshots(record.periodSnapshots);
+      const currentKey = getPeriodKey(0, 0);
+
+      if (!periodSnapshots[currentKey]) {
+        periodSnapshots[currentKey] = {
+          ...emptyFinancialData,
+          statementDate: baseStatementDate,
+        };
+      }
+
+      return {
+        version: 2,
+        baseStatementDate,
+        periodSnapshots,
+        projectionYears,
+        projectionMonths,
+        savedAt: typeof record.savedAt === 'string' ? record.savedAt : new Date().toISOString(),
+      };
+    }
+
+    return migrateV1(record);
   } catch {
     return null;
   }
 }
 
 export function savePersistedState(
-  data: FinancialData,
+  baseStatementDate: string,
+  periodSnapshots: Record<PeriodKey, FinancialData>,
   projectionYears: number,
   projectionMonths: number
 ): boolean {
@@ -107,8 +160,9 @@ export function savePersistedState(
 
   const period = parseProjectionPeriod(projectionYears, projectionMonths);
   const payload: PersistedAppState = {
-    version: 1,
-    data,
+    version: 2,
+    baseStatementDate,
+    periodSnapshots,
     projectionYears: period.years,
     projectionMonths: period.months,
     savedAt: new Date().toISOString(),
@@ -126,6 +180,7 @@ export function savePersistedState(
 export function clearPersistedState(): void {
   if (typeof window === 'undefined') return;
   localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem('financial-statement-calc:v1');
 }
 
 export { MAX_PROJECTION_YEARS, MAX_PROJECTION_MONTHS };
