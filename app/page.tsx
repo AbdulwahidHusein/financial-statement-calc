@@ -12,17 +12,21 @@ import {
   calculateCashFlow,
   emptyFinancialData,
   getDefaultStatementDate,
+  getOpeningBalanceForCashFlow,
   getProjectedStatementDate,
   getProjectionLabel,
   getTotalProjectionMonths,
   isProjectedPeriod,
+  normalizeProjectionPeriod,
 } from '@/lib/finance';
 import {
+  canonicalizeSnapshotMap,
   ensurePeriodSnapshot,
   getPeriodKey,
   getPriorPeriodCoords,
-  parsePeriodKey,
+  invalidateDownstreamSnapshots,
   resolvePeriodData,
+  syncAllSnapshotDates,
   type PeriodKey,
 } from '@/lib/periods';
 import { clearPersistedState, loadPersistedState, savePersistedState } from '@/lib/storage';
@@ -72,10 +76,13 @@ export default function FinancialApp() {
     const saved = loadPersistedState();
     startTransition(() => {
       if (saved) {
-        setBaseStatementDate(saved.baseStatementDate || getDefaultStatementDate());
-        setPeriodSnapshots(saved.periodSnapshots);
-        setProjectionYears(saved.projectionYears);
-        setProjectionMonths(saved.projectionMonths);
+        const baseDate = saved.baseStatementDate || getDefaultStatementDate();
+        const snapshots = canonicalizeSnapshotMap(saved.periodSnapshots, baseDate);
+        const { years, months } = normalizeProjectionPeriod(saved.projectionYears, saved.projectionMonths);
+        setBaseStatementDate(baseDate);
+        setPeriodSnapshots(snapshots);
+        setProjectionYears(years);
+        setProjectionMonths(months);
       } else {
         const today = getDefaultStatementDate();
         setBaseStatementDate(today);
@@ -93,9 +100,12 @@ export default function FinancialApp() {
   }, [baseStatementDate, periodSnapshots, projectionYears, projectionMonths, isStorageReady]);
 
   const handleProjectionPeriodChange = (years: number, months: number) => {
-    setPeriodSnapshots((prev) => ensurePeriodSnapshot(prev, years, months, baseStatementDate));
-    setProjectionYears(years);
-    setProjectionMonths(months);
+    const canonical = normalizeProjectionPeriod(years, months);
+    setPeriodSnapshots((prev) =>
+      ensurePeriodSnapshot(prev, canonical.years, canonical.months, baseStatementDate)
+    );
+    setProjectionYears(canonical.years);
+    setProjectionMonths(canonical.months);
   };
 
   const totalProjectionMonths = getTotalProjectionMonths(projectionYears, projectionMonths);
@@ -111,19 +121,7 @@ export default function FinancialApp() {
   const priorPeriodData = useMemo(() => {
     if (!priorPeriodCoords) {
       const current = resolvePeriodData(0, 0, periodSnapshots, baseStatementDate);
-      return {
-        ...current,
-        endingInventory: current.beginningInventory,
-        cashOnBank: 0,
-        otherReceivables: 0,
-        employeeBenefitPayable: 0,
-        creditPurchasePayable: 0,
-        outstandingFinancing: 0,
-        profitTax: 0,
-        accumulatedDepreciation: 0,
-        reservedCapital: 0,
-        additionalCapital: 0,
-      };
+      return getOpeningBalanceForCashFlow(current);
     }
     return resolvePeriodData(
       priorPeriodCoords.years,
@@ -161,9 +159,11 @@ export default function FinancialApp() {
   const updateCurrentPeriod = (updater: (prev: FinancialData) => FinancialData) => {
     setPeriodSnapshots((prev) => {
       const current = resolvePeriodData(projectionYears, projectionMonths, prev, baseStatementDate);
+      const updated = updater(current);
+      const withInvalidated = invalidateDownstreamSnapshots(prev, projectionYears, projectionMonths);
       return {
-        ...prev,
-        [currentPeriodKey]: updater(current),
+        ...withInvalidated,
+        [currentPeriodKey]: updated,
       };
     });
   };
@@ -174,23 +174,14 @@ export default function FinancialApp() {
     if (name === 'statementDate' && projectionYears === 0 && projectionMonths === 0) {
       setBaseStatementDate(value);
       setPeriodSnapshots((prev) => {
-        const next: Record<PeriodKey, FinancialData> = { ...prev };
-        for (const key of Object.keys(next) as PeriodKey[]) {
-          const { years, months } = parsePeriodKey(key);
-          next[key] = {
-            ...next[key],
-            statementDate: value
-              ? resolvePeriodData(years, months, prev, value).statementDate
-              : '',
-          };
-        }
-        if (value) {
-          next['0-0'] = {
-            ...(next['0-0'] ?? resolvePeriodData(0, 0, prev, value)),
+        const withDates = value ? syncAllSnapshotDates(prev, value) : prev;
+        return {
+          ...withDates,
+          '0-0': {
+            ...(withDates['0-0'] ?? resolvePeriodData(0, 0, withDates, value || baseStatementDate)),
             statementDate: value,
-          };
-        }
-        return next;
+          },
+        };
       });
       if (!value) {
         setProjectionYears(0);
@@ -713,6 +704,7 @@ export default function FinancialApp() {
                     <ReportRow label="Change in bank working capital loan" value={cashFlow.bankLoanChange} indent />
                     <ReportRow label="Change in outstanding financing" value={cashFlow.outstandingFinancingChange} indent />
                     <ReportRow label="Reserved capital contributed" value={cashFlow.reservedCapitalChange} indent />
+                    <ReportRow label="Additional capital contributed" value={cashFlow.additionalCapitalChange} indent />
                     <ReportRow label="Change in beginning capital" value={cashFlow.ownerCapitalChange} indent />
                     <ReportRow
                       label="Net cash from financing activities"
@@ -1247,8 +1239,9 @@ function CompactAlertStrip({
             <span className="text-[10px] uppercase tracking-wide text-indigo-500 flex-shrink-0 group-open:hidden">Details</span>
           </summary>
           <p className="px-2.5 pb-2 text-[11px] leading-relaxed text-indigo-900/90">
-            Each period is saved separately. New periods start with P&amp;L fields cleared; opening inventory and
-            capital come from the prior period&apos;s results. Cash and depreciation roll forward monthly.
+            Each period is saved separately. New periods start with P&amp;L fields cleared. Prior ending
+            inventory becomes opening inventory; cash and depreciation roll forward monthly. Beginning
+            capital updates every 12 projected months from the prior period&apos;s total capital.
           </p>
         </details>
       )}

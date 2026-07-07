@@ -101,6 +101,7 @@ export type CashFlowStatement = {
   bankLoanChange: number;
   outstandingFinancingChange: number;
   reservedCapitalChange: number;
+  additionalCapitalChange: number;
   ownerCapitalChange: number;
   netCashFromFinancing: number;
   netChangeInCash: number;
@@ -118,21 +119,11 @@ function operatingPayables(data: FinancialData) {
   return data.employeeBenefitPayable + data.creditPurchasePayable + data.profitTax;
 }
 
-/** Opening snapshot for the current period, or the prior projected period. */
-export function getPriorPeriodForCashFlow(
-  base: FinancialData,
-  projectionYears: number,
-  projectionMonths = 0
-): FinancialData {
-  const totalMonths = getTotalProjectionMonths(projectionYears, projectionMonths);
-  if (totalMonths > 0) {
-    const priorMonths = totalMonths - 1;
-    return projectFinancialData(base, Math.floor(priorMonths / 12), priorMonths % 12);
-  }
-
+/** Opening snapshot for cash flow at the current period (prior period resolved from snapshots). */
+export function getOpeningBalanceForCashFlow(currentPeriod: FinancialData): FinancialData {
   return {
-    ...base,
-    endingInventory: base.beginningInventory,
+    ...currentPeriod,
+    endingInventory: currentPeriod.beginningInventory,
     cashOnBank: 0,
     otherReceivables: 0,
     employeeBenefitPayable: 0,
@@ -173,10 +164,15 @@ export function calculateCashFlow(current: FinancialData, prior: FinancialData, 
   const bankLoanChange = calc.bankWorkingCapitalFinancing - priorCalc.bankWorkingCapitalFinancing;
   const outstandingFinancingChange = current.outstandingFinancing - prior.outstandingFinancing;
   const reservedCapitalChange = current.reservedCapital - prior.reservedCapital;
+  const additionalCapitalChange = current.additionalCapital - prior.additionalCapital;
   const ownerCapitalChange = current.beginningCapital - prior.beginningCapital;
 
   const netCashFromFinancing =
-    bankLoanChange + outstandingFinancingChange + reservedCapitalChange + ownerCapitalChange;
+    bankLoanChange +
+    outstandingFinancingChange +
+    reservedCapitalChange +
+    additionalCapitalChange +
+    ownerCapitalChange;
 
   const netChangeInCash = netCashFromOperating + netCashFromInvesting + netCashFromFinancing;
   const beginningCash = prior.cashOnBank;
@@ -194,6 +190,7 @@ export function calculateCashFlow(current: FinancialData, prior: FinancialData, 
     bankLoanChange,
     outstandingFinancingChange,
     reservedCapitalChange,
+    additionalCapitalChange,
     ownerCapitalChange,
     netCashFromFinancing,
     netChangeInCash,
@@ -215,7 +212,11 @@ export type ProjectionPeriod = {
 export function normalizeProjectionPeriod(years: number, months: number): ProjectionPeriod {
   const safeYears = Math.min(Math.max(Math.trunc(years), 0), MAX_PROJECTION_YEARS);
   const safeMonths = Math.min(Math.max(Math.trunc(months), 0), MAX_PROJECTION_MONTHS);
-  return { years: safeYears, months: safeMonths };
+  const total = Math.min(safeYears * 12 + safeMonths, MAX_PROJECTION_YEARS * 12 + MAX_PROJECTION_MONTHS);
+  return {
+    years: Math.floor(total / 12),
+    months: total % 12,
+  };
 }
 
 export function getTotalProjectionMonths(years: number, months: number): number {
@@ -325,69 +326,6 @@ export function calculateFinancials(data: FinancialData): FinancialCalculations 
 
 export function shiftStatementDate(dateStr: string, years: number): string {
   return shiftStatementDateByMonths(dateStr, years * 12);
-}
-
-/** Roll one month forward; inventory and equity reset every 12 projected months. */
-export function rollForwardOneMonth(data: FinancialData, projectedMonthIndex: number): FinancialData {
-  const calc = calculateFinancials(data);
-  const grossFixedAssets = data.building + data.propertyAndEquipment + data.vehicle;
-  const monthlyDepreciation = grossFixedAssets > 0 ? grossFixedAssets * 0.1 / 12 : 0;
-  const monthlyNetIncome = calc.netIncome / 12;
-
-  const updated: FinancialData = {
-    ...data,
-    statementDate: shiftStatementDateByMonths(data.statementDate, 1),
-    cashOnBank: data.cashOnBank + monthlyNetIncome,
-    accumulatedDepreciation: Math.min(
-      data.accumulatedDepreciation + monthlyDepreciation,
-      grossFixedAssets
-    ),
-  };
-
-  if (projectedMonthIndex > 0 && projectedMonthIndex % 12 === 0) {
-    updated.beginningInventory = data.endingInventory;
-    updated.beginningCapital = calc.totalCapital;
-    updated.reservedCapital = 0;
-    updated.additionalCapital = 0;
-  }
-
-  return updated;
-}
-
-/** Roll one year forward using prior period results as the next opening balances. */
-export function rollForwardOneYear(data: FinancialData): FinancialData {
-  const { netIncome, totalCapital } = calculateFinancials(data);
-  const grossFixedAssets = data.building + data.propertyAndEquipment + data.vehicle;
-  const annualDepreciation = grossFixedAssets > 0 ? grossFixedAssets * 0.1 : 0;
-
-  return {
-    ...data,
-    statementDate: shiftStatementDate(data.statementDate, 1),
-    beginningInventory: data.endingInventory,
-    beginningCapital: totalCapital,
-    reservedCapital: 0,
-    additionalCapital: 0,
-    cashOnBank: data.cashOnBank + netIncome,
-    accumulatedDepreciation: Math.min(
-      data.accumulatedDepreciation + annualDepreciation,
-      grossFixedAssets
-    ),
-  };
-}
-
-export function projectFinancialData(
-  base: FinancialData,
-  yearsAhead: number,
-  monthsAhead = 0
-): FinancialData {
-  const totalMonths = getTotalProjectionMonths(yearsAhead, monthsAhead);
-  if (totalMonths <= 0) return base;
-
-  let current = base;
-  for (let i = 0; i < totalMonths; i++) {
-    current = rollForwardOneMonth(current, i + 1);
-  }
-  return current;
 }
 
 export function getProjectionLabel(yearsAhead: number, monthsAhead = 0): string {

@@ -6,7 +6,7 @@ import {
   normalizeProjectionPeriod,
   type FinancialData,
 } from '@/lib/finance';
-import { getPeriodKey, type PeriodKey } from '@/lib/periods';
+import { canonicalizeSnapshotMap, getPeriodKey, type PeriodKey } from '@/lib/periods';
 
 const STORAGE_KEY = 'financial-statement-calc:v2';
 
@@ -116,15 +116,18 @@ export function loadPersistedState(): PersistedAppState | null {
     const record = parsed as Record<string, unknown>;
 
     if (record.version === 2) {
+      const baseStatementDate =
+        typeof record.baseStatementDate === 'string' && record.baseStatementDate
+          ? record.baseStatementDate
+          : new Date().toISOString().slice(0, 10);
+      const periodSnapshots = canonicalizeSnapshotMap(
+        parsePeriodSnapshots(record.periodSnapshots),
+        baseStatementDate
+      );
       const { years: projectionYears, months: projectionMonths } = parseProjectionPeriod(
         record.projectionYears,
         record.projectionMonths
       );
-      const baseStatementDate =
-        typeof record.baseStatementDate === 'string' && record.baseStatementDate
-          ? record.baseStatementDate
-          : getDefaultStatementDate();
-      const periodSnapshots = parsePeriodSnapshots(record.periodSnapshots);
       const currentKey = getPeriodKey(0, 0);
 
       if (!periodSnapshots[currentKey]) {
